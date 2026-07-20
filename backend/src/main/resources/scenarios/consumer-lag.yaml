@@ -1,0 +1,148 @@
+id: consumer-lag
+name: "Consumer Stall"
+description: "enrichment's queue consumer stalls after a config reload; volume collapses downstream"
+alert_text: "ALERT [SEV1] regulatory-gateway: no MiFID submissions received for 9 minutes (expected ~400/min). Rule RG-VOL-002. Regulator SLA window closes in 41m."
+flow: mifid-reporting
+expected_root_cause: "enrichment-service queue consumer stalled after config reload 'te-enrich-tuning-0719'; trade flow halted upstream of submission building"
+
+change_events:
+  - service: enrichment-service
+    minutes_ago: 16
+    type: CONFIG
+    summary: "Config reload 'te-enrich-tuning-0719': consumer max.poll.interval lowered to 30000ms"
+    author: "s.okafor"
+  - service: trade-confirmations
+    minutes_ago: 52
+    type: DEPLOYMENT
+    summary: "Release 1.8.3 — template copy update for confirmations footer"
+    author: "release-bot"
+
+injections:
+  - service: enrichment-service
+    from_minutes_ago: 14
+    metric: { error_rate: 0.0, throughput_factor: 0.01 }
+    logs:
+      - { level: ERROR, every_s: 30, message: "Consumer group te-enrich-1 left group: max.poll.interval.ms exceeded (30000ms); rebalance failed, consumer PAUSED" }
+      - { level: WARN, every_s: 20, message: "Inbound queue depth rising: 5400+ trades unconsumed (partition backlog growing)" }
+  - service: submission-builder
+    from_minutes_ago: 12
+    metric: { throughput_factor: 0.02 }
+    logs:
+      - { level: WARN, every_s: 25, message: "Input stream idle 120s — no enriched trades received from enrichment-service" }
+  - service: regulatory-gateway
+    from_minutes_ago: 10
+    metric: { throughput_factor: 0.0 }
+    logs:
+      - { level: WARN, every_s: 20, message: "No submissions received in current window; regulator SLA timer running [RG-VOL-002]" }
+  - service: trade-capture
+    from_minutes_ago: 14
+    logs:
+      - { level: WARN, every_s: 40, message: "Publish acknowledged but downstream consumer lag alarm: estate bus backlog 5400+ msgs" }
+
+script:
+  - thought: "SEV1 volume alert: gateway reports zero submissions. Scoping the MiFID reporting flow."
+    tool: get_topology
+    params: { flowId: mifid-reporting }
+    ledger_key: topo
+    inference: "Volume collapse — likely a stall somewhere on the path rather than a data-quality fault."
+    node_status:
+      trade-capture: PROBING
+      ref-data-service: PROBING
+      enrichment-service: PROBING
+      submission-builder: PROBING
+      regulatory-gateway: PROBING
+
+  - thought: "Change scan first: stalls very often follow a config change."
+    tool: get_change_events
+    params: { minutes: 60 }
+    ledger_key: changes
+    inference: "enrichment-service config reload 16m ago (consumer poll tuning); symptoms began ~14m ago. Strong temporal correlation."
+
+  - tool: search_incident_memory
+    params: { symptoms: "no submissions received volume collapse consumer stall backlog" }
+    ledger_key: memory
+    inference: "Looking for prior volume-collapse incidents."
+    hypotheses:
+      - { text: "Enrichment consumer stalled after config reload", probability: 50 }
+      - { text: "Trade-capture stopped publishing (venue session drop)", probability: 20 }
+      - { text: "Submission-builder wedged on a poison message", probability: 18 }
+      - { text: "Gateway inbound listener down", probability: 12 }
+
+  - thought: "Where does volume die? Checking throughput along the path, cheapest first: enrichment (it had the change)."
+    tool: query_metrics
+    params: { serviceId: enrichment-service }
+    ledger_key: enrmetrics
+    inference: "Throughput ~0 against a 415/min baseline. The flow dies at enrichment."
+    node_status:
+      enrichment-service: SUSPECT
+
+  - thought: "Is trade-capture still publishing? If yes, the backlog should be growing upstream of enrichment."
+    tool: query_metrics
+    params: { serviceId: trade-capture }
+    ledger_key: tcmetrics
+    inference: "Capture throughput at baseline — trades keep arriving and queue up. Confirms stall is at enrichment, not upstream."
+    node_status:
+      trade-capture: CLEARED
+    hypotheses:
+      - { text: "Enrichment consumer stalled after config reload", probability: 75 }
+      - { text: "Submission-builder wedged on a poison message", probability: 12 }
+      - { text: "Trade-capture stopped publishing (venue session drop)", probability: 7 }
+      - { text: "Gateway inbound listener down", probability: 6 }
+
+  - thought: "Reading enrichment logs for the stall signature."
+    tool: query_logs
+    params: { serviceId: enrichment-service, minutes: 20 }
+    ledger_key: enrlogs
+    inference: "ERROR: consumer group left after max.poll.interval.ms exceeded (30000ms) — the exact parameter lowered in config reload 'te-enrich-tuning-0719'. Consumer PAUSED, backlog 5400+."
+    node_status:
+      enrichment-service: ROOT_CAUSE
+    hypotheses:
+      - { text: "Enrichment consumer stalled after config reload", probability: 90 }
+      - { text: "Submission-builder wedged on a poison message", probability: 5 }
+      - { text: "Trade-capture stopped publishing (venue session drop)", probability: 3 }
+      - { text: "Gateway inbound listener down", probability: 2 }
+
+  - thought: "Downstream services should be starved, not broken. Verifying they are victims."
+    tool: query_logs
+    params: { serviceId: submission-builder, minutes: 15 }
+    ledger_key: sblogs
+    inference: "'Input stream idle — no enriched trades received.' Starved, not failing."
+    node_status:
+      submission-builder: CLEARED
+
+  - thought: "Gateway check to close the loop on the alert itself."
+    tool: query_metrics
+    params: { serviceId: regulatory-gateway }
+    ledger_key: gwmetrics
+    inference: "Zero inbound submissions, no errors — consistent with starvation. ref-data not involved in a volume path."
+    node_status:
+      regulatory-gateway: CLEARED
+      ref-data-service: CLEARED
+    hypotheses:
+      - { text: "Enrichment consumer stalled after config reload", probability: 93 }
+      - { text: "Submission-builder wedged on a poison message", probability: 3 }
+      - { text: "Trade-capture stopped publishing (venue session drop)", probability: 2 }
+      - { text: "Gateway inbound listener down", probability: 2 }
+
+  - thought: "Chain verified. One caveat for the report: regulator SLA window is the business risk."
+
+report:
+  root_cause: "enrichment-service's queue consumer stalled after config reload 'te-enrich-tuning-0719' lowered max.poll.interval.ms to 30000ms; the consumer exceeded the interval, left the group, and paused — halting all MiFID trade flow at the enrichment stage."
+  root_cause_service: enrichment-service
+  confidence: 93
+  summary: "A consumer-tuning config change stalled enrichment's queue consumption. Upstream capture continues publishing into a growing backlog (5400+); everything downstream is starved, surfacing at the gateway as 'no submissions received' with the regulator SLA window at risk."
+  causal_chain:
+    - { claim: "Config reload on enrichment-service 16m before alert lowered max.poll.interval.ms to 30000ms", ledger_key: changes }
+    - { claim: "enrichment-service throughput collapsed to ~0 against 415/min baseline", ledger_key: enrmetrics }
+    - { claim: "enrichment logs: consumer left group after exceeding max.poll.interval.ms; consumer PAUSED, backlog 5400+", ledger_key: enrlogs }
+    - { claim: "trade-capture still publishing at baseline — backlog grows upstream of the stall", ledger_key: tcmetrics }
+    - { claim: "submission-builder idle ('no enriched trades received'); gateway receives zero submissions", ledger_key: sblogs }
+  remediation:
+    - "Revert config 'te-enrich-tuning-0719' (restore max.poll.interval.ms) and restart consumer group te-enrich-1 (awaiting human approval)"
+    - "Monitor backlog drain; expected catch-up ~15m at 2x consumption"
+    - "Notify regulator liaison if SLA window (41m) is at risk during drain"
+  ruled_out:
+    - "trade-capture: publishing at baseline throughput"
+    - "submission-builder: starved of input, not wedged"
+    - "regulatory-gateway: listener healthy, zero inbound is upstream starvation"
+    - "ref-data-service: not on the volume path for this failure"

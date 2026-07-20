@@ -1,0 +1,83 @@
+services:
+  - id: trade-capture
+    name: Trade Capture
+    description: "Captures executed trades from front-office systems and publishes them to the estate"
+    team: "Front Office Integration"
+    slack: "#foi-support"
+    upstream: []
+    downstream: [enrichment-service]
+    business_flows: [mifid-reporting]
+    known_failure_modes:
+      - "Duplicate publication after fast-path batching retries"
+      - "Sequence gaps during venue reconnects"
+
+  - id: ref-data-service
+    name: Reference Data Service
+    description: "Provides reference data (currencies, LEIs, venues) to consuming services"
+    team: "Reference Data Platform"
+    slack: "#refdata-support"
+    upstream: []
+    downstream: [enrichment-service, trade-confirmations]
+    business_flows: [mifid-reporting, confirmations]
+    known_failure_modes:
+      - "Schema drift on minor releases breaking downstream field mappings"
+      - "Stale golden-source snapshots after failed overnight refresh"
+
+  - id: enrichment-service
+    name: Enrichment Service
+    description: "Enriches captured trades with reference data (currency, LEI, venue) before report building"
+    team: "Trade Enrichment Team"
+    slack: "#te-support"
+    upstream: [trade-capture, ref-data-service]
+    downstream: [submission-builder]
+    business_flows: [mifid-reporting]
+    known_failure_modes:
+      - "Ref-data schema drift causes silent null enrichment"
+      - "Cache staleness after ref-data redeploy"
+      - "Queue consumer stall after config reload"
+
+  - id: submission-builder
+    name: Submission Builder
+    description: "Builds ESMA RTS-22 regulatory reports from enriched trades"
+    team: "Regulatory Reporting Build"
+    slack: "#regbuild-support"
+    upstream: [enrichment-service]
+    downstream: [regulatory-gateway]
+    business_flows: [mifid-reporting]
+    known_failure_modes:
+      - "Null passthrough on optional-mapped fields"
+      - "Template version mismatch after regulator taxonomy update"
+
+  - id: regulatory-gateway
+    name: Regulatory Gateway
+    description: "Validates and submits transaction reports to the regulator endpoint (ARM)"
+    team: "Regulatory Gateway Ops"
+    slack: "#reggw-support"
+    upstream: [submission-builder]
+    downstream: []
+    business_flows: [mifid-reporting]
+    known_failure_modes:
+      - "Outbound TLS certificate expiry"
+      - "Regulator-side schema validation tightening"
+
+  - id: trade-confirmations
+    name: Trade Confirmations
+    description: "Generates and dispatches client trade confirmations (second business flow)"
+    team: "Client Confirmations"
+    slack: "#confirms-support"
+    upstream: [ref-data-service]
+    downstream: []
+    business_flows: [confirmations]
+    known_failure_modes:
+      - "Ref-data outage delays confirmation dispatch"
+
+flows:
+  - id: mifid-reporting
+    name: "MiFID Transaction Reporting"
+    path: [trade-capture, enrichment-service, submission-builder, regulatory-gateway]
+    criticality: high
+
+  - id: confirmations
+    name: "Trade Confirmations"
+    path: [ref-data-service, trade-confirmations]
+    criticality: medium

@@ -1,0 +1,177 @@
+id: schema-drift
+name: "Schema Drift (primary demo)"
+description: "ref-data release renames a field; enrichment silently nulls currency; alert fires 3 hops away on the gateway"
+alert_text: "ALERT [SEV2] regulatory-gateway: MiFID submission validation failure rate 34% over 10m window (threshold 5%). Rule RG-VAL-001. Validator: ESMA-RTS22."
+flow: mifid-reporting
+expected_root_cause: "ref-data-service release 2.4.1 renamed field 'ccy' to 'currencyCode', causing silent null currency enrichment and gateway validation failures"
+
+change_events:
+  - service: ref-data-service
+    minutes_ago: 13
+    type: DEPLOYMENT
+    summary: "Release 2.4.1 — refactor: field 'ccy' renamed to 'currencyCode' in /v1/currencies response"
+    author: "j.mueller"
+  - service: trade-capture
+    minutes_ago: 47
+    type: CONFIG
+    summary: "Feature flag 'fastpath-batching' enabled via ops console"
+    author: "ops-bot"
+
+schema_diff:
+  service: ref-data-service
+  release: "2.4.1 (deployed 13m ago)"
+  changes:
+    - "/v1/currencies response: field 'ccy' REMOVED"
+    - "/v1/currencies response: field 'currencyCode' ADDED"
+    - "/v1/lei/{id}: unchanged"
+
+injections:
+  - service: regulatory-gateway
+    from_minutes_ago: 10
+    metric: { error_rate: 0.34 }
+    logs:
+      - { level: ERROR, every_s: 4, message: "Submission TR-{seq} rejected by validator: mandatory field 'currency' missing (path $.trade.currency) [rule ESMA-RTS22-F31]" }
+  - service: enrichment-service
+    from_minutes_ago: 12
+    logs:
+      - { level: WARN, every_s: 6, message: "Schema mapping: source field 'ccy' absent in ref-data response for {isin}; currency set to null (mapper fallback) client={client} acct={acct}" }
+  - service: submission-builder
+    from_minutes_ago: 11
+    logs:
+      - { level: INFO, every_s: 8, message: "Report built for TR-{seq} with 1 null optional-mapped field (currency) — passthrough enabled" }
+
+script:
+  - thought: "Alert parsed: validation failures at regulatory-gateway on the MiFID Transaction Reporting flow. Pulling the flow subgraph."
+    tool: get_topology
+    params: { flowId: mifid-reporting }
+    ledger_key: topo
+    inference: "Scope = trade-capture → enrichment-service → submission-builder → regulatory-gateway, with ref-data-service feeding enrichment."
+    node_status:
+      trade-capture: PROBING
+      ref-data-service: PROBING
+      enrichment-service: PROBING
+      submission-builder: PROBING
+      regulatory-gateway: PROBING
+
+  - thought: "Before touching any logs: what changed recently? Changes near symptom onset are the prime suspects."
+    tool: get_change_events
+    params: { minutes: 60 }
+    ledger_key: changes
+    inference: "ref-data-service deployed Release 2.4.1 thirteen minutes ago; alert onset ten minutes ago. Temporal correlation is strong. trade-capture flag change (47m) predates symptoms by too much."
+
+  - tool: search_incident_memory
+    params: { symptoms: "regulatory gateway validation failures mandatory field currency missing MiFID submissions" }
+    ledger_key: memory
+    inference: "Checking whether we have seen this signature before."
+    hypotheses:
+      - { text: "ref-data 2.4.1 schema change broke enrichment field mapping", probability: 45 }
+      - { text: "Gateway validator pack misconfigured/tightened", probability: 25 }
+      - { text: "Enrichment cache staleness after ref-data redeploy", probability: 20 }
+      - { text: "Submission-builder template defect dropping fields", probability: 10 }
+
+  - thought: "Cheapest decisive check first: what exactly is the gateway rejecting?"
+    tool: query_logs
+    params: { serviceId: regulatory-gateway, minutes: 15 }
+    ledger_key: gwlogs
+    inference: "Rejections cite mandatory field 'currency' missing — a data-quality failure, not connectivity. The gateway is a victim, not the origin."
+    node_status:
+      regulatory-gateway: SUSPECT
+
+  - thought: "Currency enters the payload upstream. Checking submission-builder: does it drop the field or receive it already null?"
+    tool: query_logs
+    params: { serviceId: submission-builder, minutes: 15 }
+    ledger_key: sblogs
+    inference: "Builder logs 'null optional-mapped field (currency) — passthrough'. It forwards what it receives; not the origin."
+    node_status:
+      submission-builder: CLEARED
+    hypotheses:
+      - { text: "ref-data 2.4.1 schema change broke enrichment field mapping", probability: 60 }
+      - { text: "Enrichment cache staleness after ref-data redeploy", probability: 20 }
+      - { text: "Gateway validator pack misconfigured/tightened", probability: 12 }
+      - { text: "Submission-builder template defect dropping fields", probability: 8 }
+
+  - thought: "Walking upstream to enrichment-service — the service that populates currency."
+    tool: query_logs
+    params: { serviceId: enrichment-service, minutes: 15 }
+    ledger_key: enrlogs
+    inference: "WARNs since T-12m: source field 'ccy' absent in ref-data response; currency set to null. Enrichment is mapping against a field that no longer exists."
+    node_status:
+      enrichment-service: SUSPECT
+    hypotheses:
+      - { text: "ref-data 2.4.1 schema change broke enrichment field mapping", probability: 78 }
+      - { text: "Enrichment cache staleness after ref-data redeploy", probability: 12 }
+      - { text: "Gateway validator pack misconfigured/tightened", probability: 6 }
+      - { text: "Submission-builder template defect dropping fields", probability: 4 }
+
+  - thought: "Enrichment blames the ref-data response shape. Verifying directly with a schema diff against the 2.4.1 deployment."
+    tool: compare_schema
+    params: { serviceId: ref-data-service }
+    ledger_key: diff
+    inference: "Confirmed: 'ccy' removed, 'currencyCode' added in 2.4.1 — exactly the field enrichment maps from. Root cause identified."
+    node_status:
+      ref-data-service: ROOT_CAUSE
+
+  - thought: "Sanity-checking the far upstream before concluding: is trade-capture healthy?"
+    tool: query_metrics
+    params: { serviceId: trade-capture }
+    ledger_key: tcmetrics
+    inference: "Throughput at baseline, error rate nominal — capture side is clean."
+    node_status:
+      trade-capture: CLEARED
+
+  - thought: "Confirming the symptom magnitude at the gateway matches the causal chain timing."
+    tool: query_metrics
+    params: { serviceId: regulatory-gateway }
+    ledger_key: gwmetrics
+    inference: "Error rate 34% from T-10m — consistent with 2.4.1 deploy at T-13m plus pipeline lag."
+    node_status:
+      enrichment-service: SUSPECT
+      regulatory-gateway: SUSPECT
+    hypotheses:
+      - { text: "ref-data 2.4.1 schema change broke enrichment field mapping", probability: 92 }
+      - { text: "Enrichment cache staleness after ref-data redeploy", probability: 4 }
+      - { text: "Gateway validator pack misconfigured/tightened", probability: 2 }
+      - { text: "Submission-builder template defect dropping fields", probability: 2 }
+
+  - thought: "Causal chain verified — every link cites ledger evidence. Building the triage report."
+
+shortcut_script:
+  - thought: "Past incident match: ref-data schema drift with identical gateway signature. Jumping straight to verification."
+    tool: compare_schema
+    params: { serviceId: ref-data-service }
+    ledger_key: diff
+    inference: "Confirmed: 'ccy' renamed to 'currencyCode' in 2.4.1 — same failure mode as remembered incident."
+    node_status:
+      ref-data-service: ROOT_CAUSE
+      regulatory-gateway: SUSPECT
+    hypotheses:
+      - { text: "ref-data 2.4.1 schema change broke enrichment field mapping (memory match)", probability: 90 }
+      - { text: "Other", probability: 10 }
+
+  - thought: "Spot-checking enrichment to confirm the same propagation path."
+    tool: query_logs
+    params: { serviceId: enrichment-service, minutes: 15 }
+    ledger_key: enrlogs
+    inference: "Same WARN signature: 'ccy' absent, currency nulled. Chain confirmed via memory + 2 checks."
+    node_status:
+      enrichment-service: SUSPECT
+
+report:
+  root_cause: "ref-data-service Release 2.4.1 renamed field 'ccy' to 'currencyCode' in the /v1/currencies response. enrichment-service still maps from 'ccy', silently enriching trades with null currency; submissions then fail mandatory-field validation at the regulatory gateway."
+  root_cause_service: ref-data-service
+  confidence: 92
+  summary: "A backwards-incompatible ref-data schema change propagated silently through enrichment and submission building, surfacing three hops downstream as gateway validation failures. No service crashed — the failure was purely data-shape."
+  causal_chain:
+    - { claim: "Release 2.4.1 deployed on ref-data-service 13m before alert, renaming 'ccy' → 'currencyCode'", ledger_key: changes }
+    - { claim: "Schema diff confirms 'ccy' removed from /v1/currencies in 2.4.1", ledger_key: diff }
+    - { claim: "enrichment-service WARNs from T-12m: source field 'ccy' absent, currency set to null", ledger_key: enrlogs }
+    - { claim: "submission-builder passes the null currency through (optional-mapped passthrough)", ledger_key: sblogs }
+    - { claim: "regulatory-gateway rejects submissions: mandatory field 'currency' missing, error rate 34%", ledger_key: gwlogs }
+  remediation:
+    - "Roll back ref-data-service to 2.4.0 OR hotfix enrichment mapper to read 'currencyCode' with 'ccy' fallback (awaiting human approval)"
+    - "Replay held submissions from T-13m once enrichment produces non-null currency"
+    - "Add contract test: enrichment mapping fields must exist in ref-data response schema"
+  ruled_out:
+    - "trade-capture: throughput and error rate at baseline"
+    - "submission-builder: passthrough behaviour only, not the origin of nulls"
+    - "gateway validator misconfiguration: validator unchanged, rejections are legitimate"

@@ -1,0 +1,106 @@
+id: cert-expiry
+name: "Certificate Expiry"
+description: "gateway's outbound TLS cert to the regulator expires — a gateway-local fault, no upstream involvement"
+alert_text: "ALERT [SEV2] regulatory-gateway: submission delivery failures 100% over 5m window. Transport errors to ARM endpoint. Rule RG-TLS-003."
+flow: mifid-reporting
+expected_root_cause: "regulatory-gateway outbound TLS client certificate expired; handshake to the ARM regulator endpoint fails — gateway-local fault"
+
+change_events:
+  - service: submission-builder
+    minutes_ago: 38
+    type: DEPLOYMENT
+    summary: "Release 5.2.0 — performance: batch sealing parallelised"
+    author: "k.tanaka"
+
+injections:
+  - service: regulatory-gateway
+    from_minutes_ago: 8
+    metric: { error_rate: 1.0 }
+    logs:
+      - { level: ERROR, every_s: 5, message: "TLS handshake to arm.regulator.example:8443 failed: certificate expired (client cert CN=reggw-outbound-prod, notAfter=2026-07-20T17:30:00Z)" }
+      - { level: WARN, every_s: 15, message: "Submission TR-{seq} queued for retry (transport unavailable), retry 3/5" }
+
+script:
+  - thought: "Transport errors to the regulator endpoint. Scoping the MiFID flow, but the alert smells gateway-local."
+    tool: get_topology
+    params: { flowId: mifid-reporting }
+    ledger_key: topo
+    inference: "Delivery (not validation, not volume) failures — outbound leg of the gateway is the first suspect."
+    node_status:
+      trade-capture: PROBING
+      ref-data-service: PROBING
+      enrichment-service: PROBING
+      submission-builder: PROBING
+      regulatory-gateway: PROBING
+
+  - thought: "Change scan: did anything deploy near onset?"
+    tool: get_change_events
+    params: { minutes: 60 }
+    ledger_key: changes
+    inference: "Only submission-builder 5.2.0, 38m ago — 30m before symptoms, and delivery-transport errors are unrelated to batch sealing. Weak signal."
+
+  - tool: search_incident_memory
+    params: { symptoms: "submission delivery failures transport errors TLS ARM endpoint" }
+    ledger_key: memory
+    inference: "Checking for prior transport failures."
+    hypotheses:
+      - { text: "Gateway outbound TLS/cert failure (gateway-local)", probability: 45 }
+      - { text: "Regulator-side endpoint outage", probability: 30 }
+      - { text: "submission-builder 5.2.0 corrupting batches", probability: 15 }
+      - { text: "Network path/firewall change", probability: 10 }
+
+  - thought: "Decisive check: gateway logs for the exact transport error."
+    tool: query_logs
+    params: { serviceId: regulatory-gateway, minutes: 10 }
+    ledger_key: gwlogs
+    inference: "TLS handshake failed: CLIENT certificate expired (CN=reggw-outbound-prod, notAfter today 17:30Z). Fault is on our side, in the gateway's own cert."
+    node_status:
+      regulatory-gateway: ROOT_CAUSE
+    hypotheses:
+      - { text: "Gateway outbound TLS/cert failure (gateway-local)", probability: 88 }
+      - { text: "Regulator-side endpoint outage", probability: 6 }
+      - { text: "submission-builder 5.2.0 corrupting batches", probability: 4 }
+      - { text: "Network path/firewall change", probability: 2 }
+
+  - thought: "Verifying the pipeline upstream is healthy — this should be a purely local fault."
+    tool: query_metrics
+    params: { serviceId: submission-builder }
+    ledger_key: sbmetrics
+    inference: "Builder throughput at baseline, zero errors: reports are being built fine and queuing at the gateway."
+    node_status:
+      submission-builder: CLEARED
+      enrichment-service: CLEARED
+      trade-capture: CLEARED
+      ref-data-service: CLEARED
+
+  - thought: "Gateway metrics to size the impact for the report."
+    tool: query_metrics
+    params: { serviceId: regulatory-gateway }
+    ledger_key: gwmetrics
+    inference: "100% delivery failure since T-8m; submissions spooling in retry queue — nothing lost yet."
+    hypotheses:
+      - { text: "Gateway outbound TLS/cert failure (gateway-local)", probability: 95 }
+      - { text: "Regulator-side endpoint outage", probability: 3 }
+      - { text: "submission-builder 5.2.0 corrupting batches", probability: 1 }
+      - { text: "Network path/firewall change", probability: 1 }
+
+  - thought: "No upstream involvement — resisting the reflex to blame the recent deployment. Report ready."
+
+report:
+  root_cause: "The regulatory-gateway's outbound TLS client certificate (CN=reggw-outbound-prod) expired at 17:30Z today. Every TLS handshake to the ARM regulator endpoint now fails; submissions spool in the retry queue. The fault is entirely gateway-local."
+  root_cause_service: regulatory-gateway
+  confidence: 95
+  summary: "Certificate expiry on the gateway's outbound leg — no upstream service involved. The recent submission-builder deployment is coincidental and was explicitly ruled out. Submissions are retained in the retry queue; delivery resumes on cert renewal."
+  causal_chain:
+    - { claim: "Gateway logs: TLS handshake failed, client certificate expired (CN=reggw-outbound-prod, notAfter=17:30Z today)", ledger_key: gwlogs }
+    - { claim: "Delivery failure rate 100% since T-8m; submissions spooling to retry queue", ledger_key: gwmetrics }
+    - { claim: "submission-builder at baseline throughput with zero errors — upstream pipeline healthy", ledger_key: sbmetrics }
+    - { claim: "Only change in window (builder 5.2.0, 38m ago) precedes symptoms by 30m and does not touch transport", ledger_key: changes }
+  remediation:
+    - "Renew/rotate client certificate CN=reggw-outbound-prod from the internal CA and reload the gateway keystore (awaiting human approval)"
+    - "Confirm retry queue drains fully after rotation; verify no submissions dropped"
+    - "Add expiry alerting at T-30d/T-7d/T-1d for all outbound regulator certificates"
+  ruled_out:
+    - "submission-builder 5.2.0 deployment: timing mismatch and no transport involvement"
+    - "Regulator-side outage: handshake fails on OUR expired client cert, not their side"
+    - "Upstream services: all at baseline throughput and error rates"
