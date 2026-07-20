@@ -64,7 +64,7 @@ public class ScriptedInvestigator {
             // Learning loop: a high-similarity past incident lets us jump to direct verification.
             if (result != null && "search_incident_memory".equals(step.tool())
                     && scenario.shortcutScript() != null && !scenario.shortcutScript().isEmpty()
-                    && topSimilarity(result) >= 0.60) {
+                    && topSimilarity(result) >= 0.25) {
                 events.thought(incident.getId(),
                         "High-similarity past incident found in memory — skipping broad sweep, validating the known cause directly.");
                 for (ScenarioDef.ScriptStep shortcutStep : scenario.shortcutScript()) {
