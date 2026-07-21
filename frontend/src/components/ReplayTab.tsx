@@ -17,7 +17,7 @@ export default function ReplayTab() {
 
   return (
     <div className="flex h-full flex-col p-3">
-      <div className="mb-2">
+      <div className="mb-2" data-tour="replay-scrubber">
         <div className="mb-1 flex justify-between text-[11px] text-slate-500">
           <span>Investigation timeline</span>
           <span className="font-mono">{position + 1} / {replayEvents.length}</span>

@@ -2,6 +2,10 @@ import { create } from 'zustand'
 import type {
   FeedItem, Hypothesis, InvestigationEvent, LedgerEntry, NodeStatus, ScenarioInfo, Topology, TriageReport,
 } from './types'
+import { api } from './api'
+import { subscribeToInvestigation } from './ws'
+
+export type RightTab = 'Hypotheses' | 'Report' | 'Replay'
 
 interface TriageState {
   topology: Topology | null
@@ -21,6 +25,11 @@ interface TriageState {
   replayIndex: number | null
   chaosOpen: boolean
   ticketOpen: boolean
+  activeTab: RightTab
+
+  // tutorial
+  tourActive: boolean
+  tourStep: number
 
   setTopology: (t: Topology) => void
   setScenarios: (s: ScenarioInfo[], active: string) => void
@@ -31,7 +40,15 @@ interface TriageState {
   setReplayIndex: (i: number | null) => void
   setChaosOpen: (open: boolean) => void
   setTicketOpen: (open: boolean) => void
+  setActiveTab: (t: RightTab) => void
   resetInvestigation: () => void
+
+  startInvestigation: (alertText: string) => Promise<void>
+
+  startTour: () => void
+  nextStep: () => void
+  prevStep: () => void
+  endTour: () => void
 }
 
 const emptyInvestigation = {
@@ -49,12 +66,18 @@ const emptyInvestigation = {
   replayIndex: null as number | null,
 }
 
-export const useTriageStore = create<TriageState>((set) => ({
+// Held outside store state — a live WebSocket subscription must survive re-renders and cannot be serialised.
+let currentUnsubscribe: (() => void) | null = null
+
+export const useTriageStore = create<TriageState>((set, get) => ({
   topology: null,
   scenarios: [],
   activeScenario: '',
   chaosOpen: false,
   ticketOpen: false,
+  activeTab: 'Hypotheses',
+  tourActive: false,
+  tourStep: 0,
   ...emptyInvestigation,
 
   setTopology: (topology) => set({ topology }),
@@ -88,7 +111,6 @@ export const useTriageStore = create<TriageState>((set) => ({
   setReplayIndex: (replayIndex) =>
     set((s) => {
       if (replayIndex === null) {
-        // restore final state from the full event list
         return { replayIndex, ...reconstruct(s.replayEvents, s.replayEvents.length) }
       }
       return { replayIndex, ...reconstruct(s.replayEvents, replayIndex + 1) }
@@ -96,10 +118,48 @@ export const useTriageStore = create<TriageState>((set) => ({
 
   setChaosOpen: (chaosOpen) => set({ chaosOpen }),
   setTicketOpen: (ticketOpen) => set({ ticketOpen }),
-  resetInvestigation: () => set({ ...emptyInvestigation }),
+  setActiveTab: (activeTab) => set({ activeTab }),
+  resetInvestigation: () => set({ ...emptyInvestigation, activeTab: 'Hypotheses' }),
+
+  startInvestigation: async (alertText) => {
+    if (get().running) return
+    const { incidentId, mode, scenarioId } = await api.startIncident(alertText)
+    set({ activeScenario: scenarioId })
+    get().beginIncident(incidentId, mode)
+    currentUnsubscribe?.()
+    currentUnsubscribe = subscribeToInvestigation(incidentId, (e) => {
+      get().applyEvent(e)
+      if (e.type === 'REPORT_READY') void pollReport(incidentId)
+    })
+  },
+
+  startTour: () => {
+    currentUnsubscribe?.()
+    currentUnsubscribe = null
+    set({ ...emptyInvestigation, activeTab: 'Hypotheses', tourActive: true, tourStep: 0 })
+  },
+  nextStep: () => set((s) => ({ tourStep: s.tourStep + 1 })),
+  prevStep: () => set((s) => ({ tourStep: Math.max(0, s.tourStep - 1) })),
+  endTour: () => set({ tourActive: false, tourStep: 0 }),
 }))
 
-/** Rebuild canvas/hypotheses state from the first n replay events (Replay tab scrubbing). */
+async function pollReport(incidentId: string) {
+  const store = useTriageStore.getState()
+  for (let attempt = 0; attempt < 20; attempt++) {
+    try {
+      const report = await api.report(incidentId)
+      if (report && 'rootCause' in report) {
+        const [ledger, events] = await Promise.all([api.ledger(incidentId), api.events(incidentId)])
+        store.completeIncident(report, ledger, events)
+        currentUnsubscribe?.()
+        currentUnsubscribe = null
+        return
+      }
+    } catch { /* not ready yet */ }
+    await new Promise((r) => setTimeout(r, 400))
+  }
+}
+
 function reconstruct(events: InvestigationEvent[], n: number) {
   const nodeStatus: Record<string, NodeStatus> = {}
   let hypotheses: Hypothesis[] = []

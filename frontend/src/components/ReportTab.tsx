@@ -18,7 +18,7 @@ export default function ReportTab() {
 
   return (
     <div className="space-y-4 p-3 text-xs">
-      <section className="rounded-md border border-rose-900/70 bg-rose-950/30 p-3">
+      <section data-tour="root-cause" className="rounded-md border border-rose-900/70 bg-rose-950/30 p-3">
         <div className="mb-1 flex items-center justify-between">
           <span className="font-bold uppercase tracking-wider text-rose-300">Root cause</span>
           <span className="rounded bg-rose-900/60 px-2 py-0.5 font-mono text-[11px] font-bold text-rose-200">
@@ -33,7 +33,7 @@ export default function ReportTab() {
         </div>
       </section>
 
-      <section>
+      <section data-tour="causal-chain">
         <h3 className="mb-1.5 font-bold uppercase tracking-wider text-slate-400">
           Evidence chain <span className="font-normal normal-case text-slate-600">(click a link to see the cited ledger entry)</span>
         </h3>
@@ -68,7 +68,7 @@ export default function ReportTab() {
       </section>
 
       {report.blastRadius.length > 0 && (
-        <section>
+        <section data-tour="blast-radius">
           <h3 className="mb-1.5 font-bold uppercase tracking-wider text-slate-400">Blast radius</h3>
           <div className="space-y-1">
             {report.blastRadius.map((b, i) => (
@@ -88,7 +88,7 @@ export default function ReportTab() {
         </section>
       )}
 
-      <section>
+      <section data-tour="remediation">
         <h3 className="mb-1.5 font-bold uppercase tracking-wider text-slate-400">
           Remediation <span className="font-normal normal-case text-amber-500">— awaiting human approval</span>
         </h3>
@@ -116,6 +116,7 @@ export default function ReportTab() {
 
       <button
         onClick={() => setTicketOpen(true)}
+        data-tour="itsm-btn"
         className="w-full rounded-md border border-sky-700 bg-sky-950/50 py-2 text-sm font-semibold text-sky-300 hover:bg-sky-900/50"
       >
         Create ITSM ticket

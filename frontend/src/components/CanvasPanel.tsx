@@ -89,7 +89,7 @@ export default function CanvasPanel() {
   }, [topology, nodeStatus])
 
   return (
-    <div className="relative h-full">
+    <div className="relative h-full" data-tour="canvas">
       <div className="absolute left-3 top-3 z-10 flex items-center gap-2">
         <span className="rounded-full border border-sky-800 bg-sky-950/80 px-3 py-1 text-xs font-semibold text-sky-300">
           {flowName || 'Business flow'}

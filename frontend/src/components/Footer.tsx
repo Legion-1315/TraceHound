@@ -15,7 +15,7 @@ export default function Footer() {
   const elapsed = (elapsedMs / 1000).toFixed(1)
 
   return (
-    <footer className="flex items-center gap-6 border-t border-slate-800 bg-slate-950 px-4 py-1.5 text-[11px] text-slate-500">
+    <footer data-tour="footer" className="flex items-center gap-6 border-t border-slate-800 bg-slate-950 px-4 py-1.5 text-[11px] text-slate-500">
       <span>
         elapsed <span className="font-mono text-slate-300">{elapsed}s</span>
       </span>
