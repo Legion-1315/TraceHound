@@ -5,7 +5,7 @@ import type {
 import { api } from './api'
 import { subscribeToInvestigation } from './ws'
 
-export type RightTab = 'Hypotheses' | 'Report' | 'Replay'
+export type RightTab = 'Hypotheses' | 'Report' | 'Replay' | 'Analytics'
 
 interface TriageState {
   topology: Topology | null

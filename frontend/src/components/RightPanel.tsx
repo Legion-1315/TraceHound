@@ -2,8 +2,9 @@ import { useTriageStore, type RightTab } from '../store'
 import HypothesesTab from './HypothesesTab'
 import ReportTab from './ReportTab'
 import ReplayTab from './ReplayTab'
+import AnalyticsTab from './AnalyticsTab'
 
-const TABS: RightTab[] = ['Hypotheses', 'Report', 'Replay']
+const TABS: RightTab[] = ['Hypotheses', 'Report', 'Replay','Analytics']
 
 export default function RightPanel() {
   const { activeTab, setActiveTab, report } = useTriageStore()
@@ -31,6 +32,7 @@ export default function RightPanel() {
         {activeTab === 'Hypotheses' && <HypothesesTab />}
         {activeTab === 'Report' && <ReportTab />}
         {activeTab === 'Replay' && <ReplayTab />}
+        {activeTab === 'Analytics' && <AnalyticsTab />}
       </div>
     </div>
   )
