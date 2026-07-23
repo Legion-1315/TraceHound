@@ -1,5 +1,5 @@
-import { useMemo } from 'react'
-import { ReactFlow, Background, BackgroundVariant, Handle, Position, type Edge, type Node, type NodeProps } from '@xyflow/react'
+import { useEffect, useMemo, useRef } from 'react'
+import { ReactFlow, Background, BackgroundVariant, Handle, Position, type Edge, type Node, type NodeProps, type ReactFlowInstance } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useTriageStore } from '../store'
 import type { NodeStatus, ServiceDef } from '../types'
@@ -49,6 +49,25 @@ const POSITIONS: Record<string, { x: number; y: number }> = {
 
 export default function CanvasPanel() {
   const { topology, nodeStatus, activeScenario, scenarios, replayIndex } = useTriageStore()
+  const wrapperRef = useRef<HTMLDivElement>(null)
+  const flowRef = useRef<ReactFlowInstance<Node, Edge> | null>(null)
+
+  // `fitView` only runs on mount, so the graph would drift off-centre as the side
+  // panels are dragged. Re-fit on every container resize instead.
+  useEffect(() => {
+    const el = wrapperRef.current
+    if (!el) return
+    let frame = 0
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => flowRef.current?.fitView({ padding: 0.25, duration: 120 }))
+    })
+    observer.observe(el)
+    return () => {
+      cancelAnimationFrame(frame)
+      observer.disconnect()
+    }
+  }, [])
 
   const flowName = topology?.flows.find((f) => f.id === 'mifid-reporting')?.name ?? ''
   const scenarioName = scenarios.find((s) => s.id === activeScenario)?.name
@@ -89,7 +108,7 @@ export default function CanvasPanel() {
   }, [topology, nodeStatus])
 
   return (
-    <div className="relative h-full" data-tour="canvas">
+    <div ref={wrapperRef} className="relative h-full" data-tour="canvas">
       <div className="absolute left-3 top-3 z-10 flex items-center gap-2">
         <span className="rounded-full border border-sky-800 bg-sky-950/80 px-3 py-1 text-xs font-semibold text-sky-300">
           {flowName || 'Business flow'}
@@ -109,6 +128,7 @@ export default function CanvasPanel() {
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        onInit={(instance) => { flowRef.current = instance }}
         fitView
         fitViewOptions={{ padding: 0.25 }}
         proOptions={{ hideAttribution: false }}

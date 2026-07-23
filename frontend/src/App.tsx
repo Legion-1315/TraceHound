@@ -6,10 +6,50 @@ import CanvasPanel from './components/CanvasPanel'
 import RightPanel from './components/RightPanel'
 import ChaosPanel from './components/ChaosPanel'
 import TicketModal from './components/TicketModal'
+import PanelDivider from './components/PanelDivider'
 import Footer from './components/Footer'
 import Tutorial from './tutorial/Tutorial'
 
 const TOUR_SEEN_KEY = 'triage-copilot.tour-seen'
+const PANELS_KEY = 'code-catalyst.panel-widths'
+
+const DEFAULT_LEFT = 340
+const DEFAULT_RIGHT = 400
+const MIN_LEFT = 260
+const MAX_LEFT = 680
+const MIN_RIGHT = 300
+const MAX_RIGHT = 820
+/** The canvas is the star of the demo — never let the side panels squeeze it out. */
+const MIN_CANVAS = 340
+/** The two dividers occupy real width too (w-1.5 each), so reserve it. */
+const DIVIDERS = 12
+
+type PanelWidths = { left: number; right: number }
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value))
+}
+
+/** Clamp both panels against their own bounds and against the room left for the canvas. */
+function fit({ left, right }: PanelWidths): PanelWidths {
+  const available = (typeof window === 'undefined' ? 1440 : window.innerWidth) - DIVIDERS
+  const nextLeft = clamp(left, MIN_LEFT, Math.min(MAX_LEFT, available - MIN_RIGHT - MIN_CANVAS))
+  const nextRight = clamp(right, MIN_RIGHT, Math.min(MAX_RIGHT, available - nextLeft - MIN_CANVAS))
+  return { left: nextLeft, right: nextRight }
+}
+
+function loadPanels(): PanelWidths {
+  try {
+    const raw = localStorage.getItem(PANELS_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<PanelWidths>
+      if (typeof parsed.left === 'number' && typeof parsed.right === 'number') {
+        return fit({ left: parsed.left, right: parsed.right })
+      }
+    }
+  } catch { /* unreadable or corrupt — fall through to defaults */ }
+  return fit({ left: DEFAULT_LEFT, right: DEFAULT_RIGHT })
+}
 
 export default function App() {
   const {
@@ -17,6 +57,25 @@ export default function App() {
     tourActive, startTour, endTour,
   } = useTriageStore()
   const [promptFirstRun, setPromptFirstRun] = useState(false)
+  const [panels, setPanels] = useState<PanelWidths>(loadPanels)
+
+  // Persist the layout so a resized demo setup survives a reload.
+  useEffect(() => {
+    try { localStorage.setItem(PANELS_KEY, JSON.stringify(panels)) } catch { /* noop */ }
+  }, [panels])
+
+  // A narrower window can invalidate saved widths — re-fit rather than overflow.
+  useEffect(() => {
+    const onResize = () => setPanels((p) => fit(p))
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  const setLeft = (left: number) => setPanels((p) => fit({ ...p, left }))
+  const setRight = (right: number) => setPanels((p) => fit({ ...p, right }))
+  const nudgeLeft = (d: number) => setPanels((p) => fit({ ...p, left: p.left + d }))
+  const nudgeRight = (d: number) => setPanels((p) => fit({ ...p, right: p.right + d }))
+  const resetPanels = () => setPanels(fit({ left: DEFAULT_LEFT, right: DEFAULT_RIGHT }))
 
   useEffect(() => {
     api.topology().then(setTopology).catch(console.error)
@@ -59,7 +118,7 @@ export default function App() {
       <header className="flex items-center justify-between border-b border-slate-800 px-4 py-2">
         <div className="flex items-baseline gap-3">
           <h1 className="text-lg font-semibold tracking-tight text-slate-100">
-            Triage <span className="text-sky-400">Copilot</span>
+            Code-<span className="text-sky-400">Catalyst</span>
           </h1>
           <span className="text-xs text-slate-500">AI-powered incident triage · distributed estate</span>
         </div>
@@ -76,13 +135,33 @@ export default function App() {
       </header>
 
       <main className="flex min-h-0 flex-1">
-        <section className="flex w-[340px] shrink-0 flex-col border-r border-slate-800">
+        <section className="flex shrink-0 flex-col overflow-hidden" style={{ width: panels.left }}>
           <ChatPanel />
         </section>
+
+        <PanelDivider
+          label="Resize incident panel"
+          width={panels.left}
+          onWidth={setLeft}
+          onNudge={nudgeLeft}
+          onReset={resetPanels}
+          direction={1}
+        />
+
         <section className="min-w-0 flex-1">
           <CanvasPanel />
         </section>
-        <section className="flex w-[400px] shrink-0 flex-col border-l border-slate-800">
+
+        <PanelDivider
+          label="Resize report panel"
+          width={panels.right}
+          onWidth={setRight}
+          onNudge={nudgeRight}
+          onReset={resetPanels}
+          direction={-1}
+        />
+
+        <section className="flex shrink-0 flex-col overflow-hidden" style={{ width: panels.right }}>
           <RightPanel />
         </section>
       </main>

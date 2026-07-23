@@ -106,9 +106,9 @@ public class IncidentHistoryService {
 
             boolean critical = criticalIdx.contains(i);
             boolean aiResolved = !unresolvedIdx.contains(i);
-            long mttr = 4 * 60 + (long) (rnd.nextDouble() * 12 * 60);  // 4-16 min
-            if (critical) mttr += 3 * 60;
-            if (!aiResolved) mttr += 9 * 60;                            // human escalation takes longer
+            long mttr = 15 * 60 + (long) (rnd.nextDouble() * 35 * 60);  // 15-50 min
+            if (critical) mttr += 15 * 60;
+            if (!aiResolved) mttr += 30 * 60;                           // human escalation takes longer
             int baseConfidence = def.report() != null ? def.report().confidence() : 88;
             int confidence = aiResolved ? clamp(baseConfidence - 6 + rnd.nextInt(12), 70, 99) : 0;
             int toolCalls = 6 + rnd.nextInt(7);

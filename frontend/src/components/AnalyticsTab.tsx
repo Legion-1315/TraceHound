@@ -62,9 +62,8 @@ export default function AnalyticsTab() {
         </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         <KPICard title="Incidents" value={summary.totalIncidents} />
-        <KPICard title="Avg MTTR" value={summary.avgMttr} />
         <KPICard title="AI Success" value={summary.aiSuccess} />
         <KPICard title="Critical" value={summary.criticalIncidents} />
       </div>

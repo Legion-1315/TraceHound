@@ -119,7 +119,7 @@ export default function ReportTab() {
         data-tour="itsm-btn"
         className="w-full rounded-md border border-sky-700 bg-sky-950/50 py-2 text-sm font-semibold text-sky-300 hover:bg-sky-900/50"
       >
-        Create ITSM ticket
+        Create JIRA
       </button>
     </div>
   )

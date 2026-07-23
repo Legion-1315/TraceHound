@@ -1,22 +1,14 @@
-# Alternative to running two local processes. Not required for the demo —
-# the two-process path in README.md is the one verified end-to-end.
+# One container, one port — the UI is bundled into the Spring Boot jar.
 services:
-  backend:
-    build: ./backend
+  triage:
+    build: .
     ports:
       - "8080:8080"
     environment:
       - TRIAGE_MODE=${TRIAGE_MODE:-scripted}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
     volumes:
-      - triage-memory:/app/data
-
-  frontend:
-    build: ./frontend
-    ports:
-      - "5173:80"
-    depends_on:
-      - backend
+      - triage-data:/app/data
 
 volumes:
-  triage-memory:
+  triage-data:

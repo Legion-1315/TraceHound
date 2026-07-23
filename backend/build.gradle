@@ -31,3 +31,63 @@ tasks.withType(JavaCompile).configureEach {
 tasks.named('test') {
 	useJUnitPlatform()
 }
+
+// Without this, `build/libs/` also gets a `-plain.jar`, which makes a
+// `COPY build/libs/*.jar app.jar` in the Dockerfile ambiguous.
+tasks.named('jar') {
+	enabled = false
+}
+
+// ---------------------------------------------------------------------------
+// Monolith packaging.
+//
+// The React app is built by npm and folded into this jar's static resources, so
+// `bootRun` (or `java -jar`) serves UI + REST + WebSocket from :8080 alone —
+// one process, one port, no CORS, no reverse proxy.
+//
+// Both tasks are incremental: after the first build they are UP-TO-DATE until
+// something under frontend/ actually changes. Pass -PskipFrontend to skip npm
+// entirely (backend-only iteration, or running tests without Node installed).
+// ---------------------------------------------------------------------------
+def frontendDir = file('../frontend')
+def npm = System.getProperty('os.name').toLowerCase().contains('windows') ? 'npm.cmd' : 'npm'
+def skipFrontend = project.hasProperty('skipFrontend')
+
+tasks.register('npmInstall', Exec) {
+	group = 'frontend'
+	description = 'Installs the React app\'s npm dependencies.'
+	workingDir = frontendDir
+	commandLine npm, 'install', '--no-audit', '--no-fund'
+	inputs.file("${frontendDir}/package.json")
+	inputs.file("${frontendDir}/package-lock.json")
+	// npm rewrites this on every successful install. Using it as the declared
+	// output lets Gradle skip re-installing without fingerprinting all of
+	// node_modules (which would cost more than the install itself).
+	outputs.file("${frontendDir}/node_modules/.package-lock.json")
+	onlyIf { !skipFrontend }
+}
+
+tasks.register('buildFrontend', Exec) {
+	group = 'frontend'
+	description = 'Compiles the React app into frontend/dist.'
+	dependsOn 'npmInstall'
+	workingDir = frontendDir
+	commandLine npm, 'run', 'build'
+	inputs.dir("${frontendDir}/src")
+	inputs.dir("${frontendDir}/public")
+	inputs.files(
+			"${frontendDir}/index.html",
+			"${frontendDir}/vite.config.ts",
+			"${frontendDir}/package.json",
+			"${frontendDir}/tsconfig.json",
+			"${frontendDir}/tsconfig.app.json",
+			"${frontendDir}/tsconfig.node.json")
+	outputs.dir("${frontendDir}/dist")
+	onlyIf { !skipFrontend }
+}
+
+tasks.named('processResources') {
+	dependsOn 'buildFrontend'
+	// Served by Spring Boot from classpath:/static/ — index.html lands on "/".
+	from("${frontendDir}/dist") { into 'static' }
+}

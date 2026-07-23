@@ -1,0 +1,8 @@
+# Keep the source upload for `gcloud run deploy --source .` small.
+# Without this, gcloud falls back to .gitignore and may upload node_modules.
+.git/
+**/node_modules/
+**/build/
+**/dist/
+**/.gradle/
+**/data/

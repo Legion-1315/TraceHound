@@ -12,15 +12,15 @@ export default function TicketModal() {
       >
         <div className="flex items-center justify-between border-b border-slate-800 bg-slate-900 px-4 py-2.5">
           <div className="flex items-center gap-2">
-            <span className="rounded bg-emerald-800 px-1.5 py-0.5 text-[10px] font-bold text-emerald-100">SN</span>
-            <span className="text-sm font-semibold text-slate-200">New Incident — ServiceNow (mock)</span>
+            <span className="rounded bg-blue-700 px-1.5 py-0.5 text-[10px] font-bold text-blue-100">JR</span>
+            <span className="text-sm font-semibold text-slate-200">New Issue — JIRA (mock)</span>
           </div>
           <button onClick={() => setTicketOpen(false)} className="text-slate-500 hover:text-slate-200">✕</button>
         </div>
         <div className="space-y-3 p-4 text-xs">
           {[
             ['Number', `INC${String(Math.floor(Math.random() * 900000) + 100000)}`],
-            ['Caller', 'triage-copilot (automated)'],
+            ['Reporter', 'code-catalyst (automated)'],
             ['Assignment group', report.owningTeam],
             ['Priority', '2 - High'],
             ['Category', 'Application / Data Quality'],

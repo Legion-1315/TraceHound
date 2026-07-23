@@ -4,7 +4,9 @@
 
 A hackathon prototype (Deutsche Bank) that diagnoses production incidents across a distributed application estate. It maintains a topology map of services and business flows, and an LLM agent uses that map to investigate incidents the way a senior SRE would: form ranked hypotheses, run the cheapest decisive checks first, walk the graph upstream/downstream following evidence, and produce a triage report where **every claim cites recorded evidence**.
 
-This is a **small-scale, visually-driven demo**. Everything (services, telemetry, change events) is simulated in-process. No real Kafka, Neo4j, or OpenTelemetry — we simulate their behavior so the demo runs anywhere with `docker compose up` or two local processes. Prioritize demo reliability and visual clarity over infrastructure realism.
+This is a **small-scale, visually-driven demo**. Everything (services, telemetry, change events) is simulated in-process. No real Kafka, Neo4j, or OpenTelemetry — we simulate their behavior so the demo runs anywhere from a single process. Prioritize demo reliability and visual clarity over infrastructure realism.
+
+**Packaging: monolithic.** The React app is compiled by the Gradle build and folded into the Spring Boot jar's static resources, so `./gradlew bootRun` (or `java -jar`) serves UI + REST + WebSocket together on **:8080** — one process, one port, no CORS, no reverse proxy. `npm run dev` on :5173 remains available for hot-reload UI work and proxies to :8080.
 
 ## Repository layout (monorepo)
 
@@ -12,12 +14,14 @@ This is a **small-scale, visually-driven demo**. Everything (services, telemetry
 triage-copilot/
 ├── CLAUDE.md                  (this file)
 ├── README.md                  (setup + demo script)
-├── docker-compose.yml         (backend + frontend, optional)
-├── backend/                   Spring Boot 3.x, Java 21, Gradle
+├── Dockerfile                 (single image: builds the UI, folds it into the jar)
+├── docker-compose.yml         (one service on :8080, optional)
+├── backend/                   Spring Boot 3.x, Java 21, Gradle — builds the whole app
 │   └── src/main/resources/
 │       ├── topology.yaml      (the estate definition — single source of truth)
 │       └── scenarios/         (fault scenario definitions)
 └── frontend/                  React 18 + TypeScript + Vite + Tailwind + React Flow
+                               (compiled into backend/build/resources/main/static)
 ```
 
 ## The simulated estate (defined in topology.yaml)
@@ -117,7 +121,7 @@ Three-panel layout, dark theme, professional (bank-demo aesthetic, not toy-like)
 2. **Center — Live investigation canvas (the star):** React Flow graph of the subgraph. Node states: grey (unknown), pulsing blue (probing), green (cleared), amber (suspect), red (root cause). Animate edges on the path being walked. Auto-layout left→right in flow order. Business-flow name as a title chip. Smooth transitions — this panel is what wins the demo.
 3. **Right — Tabs:**
    - *Hypotheses:* live-ranked list with probability bars that visibly re-rank as evidence arrives.
-   - *Report:* rendered triage report; each evidence link expandable to show the cited ledger entry; blast-radius section listing affected flows/teams; "Create ITSM ticket" button that shows a pre-filled mock ServiceNow ticket modal.
+   - *Report:* rendered triage report; each evidence link expandable to show the cited ledger entry; blast-radius section listing affected flows/teams; "Create JIRA" button that shows a pre-filled mock JIRA issue modal.
    - *Replay:* timeline scrubber over the evidence ledger — step through the investigation after the fact.
 4. **Hidden chaos panel:** keyboard shortcut (e.g., Ctrl+Shift+K) opens fault-injection controls listing the 3 scenarios. Lets a judge pick the fault live.
 5. **Footer:** elapsed investigation time, tool-call count, PII-redacted count — measured numbers for the pitch.

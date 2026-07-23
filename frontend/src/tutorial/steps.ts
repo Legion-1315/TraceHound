@@ -28,7 +28,7 @@ const SCHEMA_DRIFT_ALERT =
 export const TUTORIAL_STEPS: Step[] = [
   {
     target: 'none',
-    title: 'Welcome to Triage Copilot',
+    title: 'Welcome to Code-Catalyst',
     body:
       "This 2-minute tour walks you through a full production incident: how the agent scopes it, ranks hypotheses, " +
       "walks the estate on evidence, and produces a report where every claim cites a ledger entry. " +
@@ -127,7 +127,7 @@ export const TUTORIAL_STEPS: Step[] = [
     target: 'itsm-btn',
     title: 'Ticket handoff',
     body:
-      "One click hands the entire investigation to ServiceNow (mocked here) with assignment group, evidence, and remediation pre-filled. " +
+      "One click hands the entire investigation to JIRA (mocked here) with assignment group, evidence, and remediation pre-filled. " +
       "Skip for now — we'll continue.",
     side: 'left',
   },
