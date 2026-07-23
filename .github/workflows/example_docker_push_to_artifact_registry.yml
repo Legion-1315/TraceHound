@@ -1,12 +1,6 @@
 name: Docker Push to Artifact Registry
 on:
-
   workflow_dispatch:
-
-env:
-  REGION: europe-west1
-  REPOSITORY: code-catalyst
-  IMAGE_NAME: triage-copilot
 
 jobs:
   build-deploy:
