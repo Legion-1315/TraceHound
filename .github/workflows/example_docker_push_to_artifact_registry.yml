@@ -20,7 +20,7 @@ jobs:
         with:
           export_environment_variables: true
           project_id : hack-team-code-catalyst
-          workload_identity_provider: projects/hack-team-code-catalyst/locations/global
+          workload_identity_provider: projects/hack-team-code-catalyst/locations/global/workloadIdentityPools/github-2026/providers/github-2026
           service_account: infrastructure@hack-team-code-catalyst.iam.gserviceaccount.com  # Use your Infrastructure SA to manage resources
 
       - name: 'Set up Cloud SDK'
