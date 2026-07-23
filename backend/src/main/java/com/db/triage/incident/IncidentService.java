@@ -2,6 +2,7 @@ package com.db.triage.incident;
 
 import com.db.triage.agent.LlmInvestigator;
 import com.db.triage.agent.ScriptedInvestigator;
+import com.db.triage.history.IncidentHistoryService;
 import com.db.triage.model.ScenarioDef;
 import com.db.triage.model.TriageReport;
 import com.db.triage.sim.ScenarioService;
@@ -23,17 +24,20 @@ public class IncidentService {
     private final LlmInvestigator llm;
     private final ScenarioService scenarios;
     private final SimulationEngine sim;
+    private final IncidentHistoryService history;
     private final String configuredMode;
     private final Map<String, Incident> incidents = new ConcurrentHashMap<>();
     private final AtomicInteger counter = new AtomicInteger(1);
     private final ExecutorService executor = Executors.newCachedThreadPool();
 
     public IncidentService(ScriptedInvestigator scripted, LlmInvestigator llm, ScenarioService scenarios,
-                           SimulationEngine sim, @Value("${triage.investigator-mode}") String configuredMode) {
+                           SimulationEngine sim, IncidentHistoryService history,
+                           @Value("${triage.investigator-mode}") String configuredMode) {
         this.scripted = scripted;
         this.llm = llm;
         this.scenarios = scenarios;
         this.sim = sim;
+        this.history = history;
         this.configuredMode = configuredMode;
     }
 
@@ -63,21 +67,25 @@ public class IncidentService {
             TriageReport report = useLlm
                     ? llm.investigate(incident, scenario)
                     : scripted.investigate(incident, scenario);
-            incident.setReport(report);
-            incident.setStatus(Incident.Status.COMPLETE);
+            complete(incident, scenario, report);
         } catch (Exception e) {
             // LLM mode must never strand the demo: fall back to the scripted investigator.
             if (useLlm) {
                 try {
-                    TriageReport report = scripted.investigate(incident, scenario);
-                    incident.setReport(report);
-                    incident.setStatus(Incident.Status.COMPLETE);
+                    complete(incident, scenario, scripted.investigate(incident, scenario));
                     return;
                 } catch (Exception ignored) {
                 }
             }
             incident.setStatus(Incident.Status.FAILED);
         }
+    }
+
+    private void complete(Incident incident, ScenarioDef scenario, TriageReport report) {
+        incident.setReport(report);
+        incident.setStatus(Incident.Status.COMPLETE);
+        // Append to the historical corpus that powers the Analytics dashboards.
+        history.record(incident.getId(), scenario.id(), report, incident.getAlertText());
     }
 
     public Optional<Incident> byId(String id) {

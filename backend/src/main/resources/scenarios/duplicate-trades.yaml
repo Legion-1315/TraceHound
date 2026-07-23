@@ -1,0 +1,137 @@
+id: duplicate-trades
+name: "Duplicate Publication"
+description: "a trade-capture fast-path flag republishes trades; duplicates surface as idempotency rejections at the gateway"
+category: "Data Consistency"
+alert_text: "ALERT [SEV2] regulatory-gateway: MiFID submission duplicate-rejection rate 28% over 10m window (threshold 2%). Rule RG-DUP-004. Idempotency violations."
+flow: mifid-reporting
+expected_root_cause: "trade-capture 'fastpath-batching' flag causes duplicate publication of trades after fast-path retry; duplicate transaction references propagate downstream and are rejected by the gateway's idempotency check"
+
+change_events:
+  - service: trade-capture
+    minutes_ago: 22
+    type: CONFIG
+    summary: "Feature flag 'fastpath-batching' enabled via ops console (fast-path publish with retry)"
+    author: "ops-bot"
+  - service: regulatory-gateway
+    minutes_ago: 65
+    type: CONFIG
+    summary: "Validator pack refresh: ESMA-RTS22 v3.2 (no rule changes)"
+    author: "release-bot"
+
+injections:
+  - service: regulatory-gateway
+    from_minutes_ago: 12
+    metric: { error_rate: 0.28 }
+    logs:
+      - { level: ERROR, every_s: 5, message: "Submission TR-{seq} rejected: duplicate transaction reference, idempotency key already seen this window [rule ESMA-RTS22-DUP]" }
+  - service: trade-capture
+    from_minutes_ago: 20
+    metric: { throughput_factor: 1.6 }
+    logs:
+      - { level: WARN, every_s: 6, message: "Duplicate publication: trade {isin} republished after fast-path retry (flag fastpath-batching); dedupe window miss, seq {seq}" }
+  - service: enrichment-service
+    from_minutes_ago: 18
+    metric: { throughput_factor: 1.55 }
+    logs:
+      - { level: INFO, every_s: 12, message: "Enriched trade {isin} (note: elevated inbound volume, dedupe is upstream responsibility)" }
+
+script:
+  - thought: "Gateway is rejecting duplicates — an idempotency/data-consistency problem. Pulling the flow subgraph."
+    tool: get_topology
+    params: { flowId: mifid-reporting }
+    ledger_key: topo
+    inference: "Scope = trade-capture -> enrichment-service -> submission-builder -> regulatory-gateway. Duplicates are created somewhere and only detected at the gateway."
+    node_status:
+      trade-capture: PROBING
+      ref-data-service: PROBING
+      enrichment-service: PROBING
+      submission-builder: PROBING
+      regulatory-gateway: PROBING
+
+  - thought: "What changed? Duplicate publication is classically caused by a retry/batching config change."
+    tool: get_change_events
+    params: { minutes: 60 }
+    ledger_key: changes
+    inference: "trade-capture enabled 'fastpath-batching' (fast-path publish WITH retry) 22m ago; duplicate rejections began ~12m ago. A retry-on-publish flag is a textbook duplication source."
+
+  - tool: search_incident_memory
+    params: { symptoms: "gateway duplicate transaction reference idempotency rejection republished trades" }
+    ledger_key: memory
+    inference: "Checking for prior duplicate-publication incidents."
+    hypotheses:
+      - { text: "trade-capture fastpath-batching causes duplicate publication", probability: 47 }
+      - { text: "Gateway idempotency window misconfigured after validator refresh", probability: 23 }
+      - { text: "Enrichment re-emitting trades on redelivery", probability: 18 }
+      - { text: "Submission-builder double-sealing batches", probability: 12 }
+
+  - thought: "Confirm what the gateway is actually rejecting."
+    tool: query_logs
+    params: { serviceId: regulatory-gateway, minutes: 15 }
+    ledger_key: gwlogs
+    inference: "Rejections cite 'duplicate transaction reference, idempotency key already seen'. The gateway is correctly catching duplicates that were created upstream — it is the detector, not the source."
+    node_status:
+      regulatory-gateway: SUSPECT
+
+  - thought: "Walk upstream. Is enrichment or the builder multiplying messages, or are duplicates arriving already?"
+    tool: query_logs
+    params: { serviceId: enrichment-service, minutes: 15 }
+    ledger_key: enrlogs
+    inference: "Enrichment logs note elevated inbound volume but 'dedupe is upstream responsibility' — it forwards 1:1. Duplicates already exist before enrichment."
+    node_status:
+      enrichment-service: CLEARED
+    hypotheses:
+      - { text: "trade-capture fastpath-batching causes duplicate publication", probability: 68 }
+      - { text: "Gateway idempotency window misconfigured after validator refresh", probability: 15 }
+      - { text: "Enrichment re-emitting trades on redelivery", probability: 9 }
+      - { text: "Submission-builder double-sealing batches", probability: 8 }
+
+  - thought: "Check trade-capture's publish metrics — duplication should show as anomalously inflated throughput."
+    tool: query_metrics
+    params: { serviceId: trade-capture }
+    ledger_key: tcmetrics
+    inference: "trade-capture throughput ~1.6x baseline with no rise in actual venue executions — it is publishing more messages than there are trades. Strong duplication signal at the source."
+    node_status:
+      trade-capture: SUSPECT
+
+  - thought: "Read trade-capture logs to tie the inflation to the fast-path flag."
+    tool: query_logs
+    params: { serviceId: trade-capture, minutes: 20 }
+    ledger_key: tclogs
+    inference: "WARNs: 'Duplicate publication: trade republished after fast-path retry (flag fastpath-batching); dedupe window miss'. The flag re-publishes on retry without honouring the dedupe window. Root cause confirmed."
+    node_status:
+      trade-capture: ROOT_CAUSE
+
+  - thought: "Sanity check: is this really the flag and not the gateway's idempotency window? Confirm gateway error magnitude and timing."
+    tool: query_metrics
+    params: { serviceId: regulatory-gateway }
+    ledger_key: gwmetrics
+    inference: "28% duplicate-rejection rate from T-12m aligns with the flag enablement at T-22m plus pipeline lag. Gateway idempotency logic is working as designed."
+    node_status:
+      regulatory-gateway: SUSPECT
+    hypotheses:
+      - { text: "trade-capture fastpath-batching causes duplicate publication", probability: 91 }
+      - { text: "Gateway idempotency window misconfigured after validator refresh", probability: 4 }
+      - { text: "Enrichment re-emitting trades on redelivery", probability: 3 }
+      - { text: "Submission-builder double-sealing batches", probability: 2 }
+
+  - thought: "Causal chain verified — the duplication originates at ingestion. Building the report."
+
+report:
+  root_cause: "The 'fastpath-batching' feature flag enabled on trade-capture 22 minutes ago republishes trades on fast-path retry without honouring the dedupe window. Duplicate transaction references propagate through enrichment and submission building and are rejected by the regulatory gateway's idempotency check (28% duplicate-rejection rate)."
+  root_cause_service: trade-capture
+  confidence: 91
+  summary: "A publish-side feature flag introduced duplicate messages at the very first hop. Every downstream service faithfully forwarded the duplicates; the gateway's idempotency guard is correctly catching them — three hops from the source. The fix is at ingestion, not the gateway."
+  causal_chain:
+    - { claim: "trade-capture enabled 'fastpath-batching' (fast-path publish with retry) 22m before the alert", ledger_key: changes }
+    - { claim: "trade-capture throughput ~1.6x baseline with no rise in venue executions — publishing more messages than trades", ledger_key: tcmetrics }
+    - { claim: "trade-capture logs: duplicate publication after fast-path retry, dedupe window miss (flag fastpath-batching)", ledger_key: tclogs }
+    - { claim: "enrichment forwards 1:1 (dedupe is upstream responsibility) — duplicates pre-exist", ledger_key: enrlogs }
+    - { claim: "regulatory-gateway rejects duplicate transaction references, 28% idempotency-violation rate", ledger_key: gwlogs }
+  remediation:
+    - "Disable the 'fastpath-batching' flag on trade-capture OR patch it to honour the dedupe window on retry (awaiting human approval)"
+    - "Purge duplicate transaction references queued since T-22m before resubmission"
+    - "Add a publish-side idempotency guard at trade-capture so dedupe does not rely solely on the gateway"
+  ruled_out:
+    - "regulatory-gateway: idempotency check is working correctly; it detects, not creates, duplicates"
+    - "enrichment-service: forwards 1:1, elevated volume is inbound not self-generated"
+    - "submission-builder: no double-sealing observed"

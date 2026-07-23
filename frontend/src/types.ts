@@ -88,6 +88,24 @@ export interface ScenarioInfo {
   alertText: string
 }
 
+export interface ChartEntry {
+  name: string
+  value: number
+}
+
+export interface DashboardData {
+  summary: {
+    totalIncidents: number
+    avgMttr: string
+    aiSuccess: string
+    criticalIncidents: number
+  }
+  categories: ChartEntry[]
+  services: ChartEntry[]
+  trend: ChartEntry[]
+  severity: ChartEntry[]
+}
+
 export interface FeedItem {
   kind: 'thought' | 'tool'
   text: string

@@ -12,6 +12,7 @@ public record ScenarioDef(
         String id,
         String name,
         String description,
+        String category,
         @JsonProperty("alert_text") String alertText,
         String flow,
         @JsonProperty("expected_root_cause") String expectedRootCause,

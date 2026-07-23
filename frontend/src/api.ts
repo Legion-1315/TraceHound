@@ -1,4 +1,6 @@
-import type { InvestigationEvent, LedgerEntry, ScenarioInfo, Topology, TriageReport } from './types'
+import type {
+  DashboardData, InvestigationEvent, LedgerEntry, ScenarioInfo, Topology, TriageReport,
+} from './types'
 
 async function get<T>(url: string): Promise<T> {
   const res = await fetch(url)
@@ -26,6 +28,8 @@ export const api = {
     if (!res.ok) throw new Error(`start incident failed: ${res.status}`)
     return res.json() as Promise<{ incidentId: string; mode: string; scenarioId: string }>
   },
+
+  analytics: () => get<DashboardData>('/api/analytics'),
 
   report: (id: string) => get<TriageReport>(`/api/incidents/${id}/report`),
   ledger: (id: string) => get<LedgerEntry[]>(`/api/incidents/${id}/ledger`),

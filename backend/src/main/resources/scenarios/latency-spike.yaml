@@ -1,0 +1,135 @@
+id: latency-spike
+name: "Latency Spike"
+description: "a ref-data DB index rebuild slows /v1/currencies queries; enrichment latency degrades estate-wide with no errors"
+category: "Performance"
+alert_text: "ALERT [SEV2] enrichment-service: MiFID enrichment latency p95 4.8s over 10m window (SLA 500ms). Rule EN-LAT-004. Throughput degraded."
+flow: mifid-reporting
+expected_root_cause: "ref-data-service golden-source DB index rebuild during maintenance slowed /v1/currencies queries to ~4.2s p95; enrichment blocks on synchronous ref-data calls, degrading latency and throughput across the flow"
+
+change_events:
+  - service: ref-data-service
+    minutes_ago: 18
+    type: MAINTENANCE
+    summary: "Golden-source maintenance: rebuild index currency_ccy_idx on /v1/currencies query path"
+    author: "dba-oncall"
+  - service: enrichment-service
+    minutes_ago: 55
+    type: CONFIG
+    summary: "Cache TTL tuning: currency cache TTL raised 60s -> 120s"
+    author: "s.okafor"
+
+injections:
+  - service: ref-data-service
+    from_minutes_ago: 15
+    metric: { latency_ms: 4200, throughput_factor: 0.9 }
+    logs:
+      - { level: WARN, every_s: 8, message: "Slow query on /v1/currencies: 4180ms (full index scan, currency_ccy_idx unavailable during rebuild) caller=enrichment-service" }
+  - service: enrichment-service
+    from_minutes_ago: 13
+    metric: { latency_ms: 4800, throughput_factor: 0.35 }
+    logs:
+      - { level: WARN, every_s: 6, message: "Ref-data call for {isin} exceeded 3000ms budget (4790ms); enrichment blocked on synchronous currency lookup" }
+  - service: submission-builder
+    from_minutes_ago: 11
+    metric: { throughput_factor: 0.4 }
+    logs:
+      - { level: WARN, every_s: 20, message: "Input rate degraded: enriched-trade arrivals down ~60%, upstream latency suspected" }
+  - service: regulatory-gateway
+    from_minutes_ago: 10
+    metric: { throughput_factor: 0.42 }
+    logs:
+      - { level: WARN, every_s: 20, message: "Submission volume below expected band; no validation errors, throughput degraded [RG-VOL-002]" }
+
+script:
+  - thought: "Latency SLA breach on enrichment-service. Pulling the MiFID reporting subgraph — latency issues usually mean a slow dependency, not a crash."
+    tool: get_topology
+    params: { flowId: mifid-reporting }
+    ledger_key: topo
+    inference: "Scope = trade-capture -> enrichment-service -> submission-builder -> regulatory-gateway, with ref-data-service feeding enrichment synchronously."
+    node_status:
+      trade-capture: PROBING
+      ref-data-service: PROBING
+      enrichment-service: PROBING
+      submission-builder: PROBING
+      regulatory-gateway: PROBING
+
+  - thought: "What changed recently? Latency spikes frequently trail a deploy or a maintenance action."
+    tool: get_change_events
+    params: { minutes: 60 }
+    ledger_key: changes
+    inference: "ref-data-service ran an index rebuild on the /v1/currencies query path 18m ago; enrichment latency onset ~13m ago. Index rebuilds routinely regress query latency. Strong candidate."
+
+  - tool: search_incident_memory
+    params: { symptoms: "enrichment latency p95 breach slow throughput degraded no errors" }
+    ledger_key: memory
+    inference: "Checking for prior latency incidents with this shape."
+    hypotheses:
+      - { text: "ref-data DB index rebuild slowed currency lookups", probability: 45 }
+      - { text: "enrichment cache TTL change increased ref-data load", probability: 25 }
+      - { text: "enrichment-service GC pause / resource saturation", probability: 18 }
+      - { text: "Network latency between enrichment and ref-data", probability: 12 }
+
+  - thought: "Confirm the symptom at enrichment: is this genuinely latency, and is throughput dropping with it?"
+    tool: query_metrics
+    params: { serviceId: enrichment-service }
+    ledger_key: enrmetrics
+    inference: "p95 ~4.8s vs 500ms SLA, throughput down to ~35%, error rate nominal. Classic blocked-on-slow-dependency signature, not a failure."
+    node_status:
+      enrichment-service: SUSPECT
+
+  - thought: "Enrichment calls ref-data synchronously for currency. Check ref-data's own latency."
+    tool: query_metrics
+    params: { serviceId: ref-data-service }
+    ledger_key: rdmetrics
+    inference: "ref-data /v1/currencies p95 ~4.2s against a normally single-digit-ms path. The slowness originates here; enrichment is just blocked waiting on it."
+    node_status:
+      ref-data-service: SUSPECT
+
+  - thought: "Reading ref-data logs to tie the slowness to the maintenance change."
+    tool: query_logs
+    params: { serviceId: ref-data-service, minutes: 20 }
+    ledger_key: rdlogs
+    inference: "Slow-query WARNs: full index scan because currency_ccy_idx is unavailable during rebuild — exactly the 18m-ago maintenance action. Root cause located."
+    node_status:
+      ref-data-service: ROOT_CAUSE
+
+  - thought: "Rule out a competing hypothesis: did the ref-data response SHAPE change too? If not, this is purely performance."
+    tool: compare_schema
+    params: { serviceId: ref-data-service }
+    ledger_key: diff
+    inference: "No schema changes on ref-data — this is a pure latency regression, not a data-contract break. Rules out schema drift."
+
+  - thought: "Confirm the far upstream is healthy: is trade-capture feeding at normal rate and latency?"
+    tool: query_metrics
+    params: { serviceId: trade-capture }
+    ledger_key: tcmetrics
+    inference: "trade-capture at baseline throughput and low latency — the slowdown starts at the ref-data dependency, not at ingestion."
+    node_status:
+      trade-capture: CLEARED
+    hypotheses:
+      - { text: "ref-data DB index rebuild slowed currency lookups", probability: 90 }
+      - { text: "enrichment cache TTL change increased ref-data load", probability: 5 }
+      - { text: "enrichment-service GC pause / resource saturation", probability: 3 }
+      - { text: "Network latency between enrichment and ref-data", probability: 2 }
+
+  - thought: "Causal chain verified with metric and log evidence. Building the report."
+
+report:
+  root_cause: "ref-data-service ran a golden-source index rebuild (currency_ccy_idx) on the /v1/currencies query path 18 minutes ago. With the index unavailable, currency lookups fall back to a full index scan (~4.2s p95). enrichment-service blocks on these synchronous calls, degrading enrichment latency to ~4.8s and cutting throughput across the flow. No errors — a pure performance regression."
+  root_cause_service: ref-data-service
+  confidence: 90
+  summary: "A database maintenance action on ref-data silently regressed query latency; because enrichment calls ref-data synchronously, the slowness propagated as an enrichment SLA breach and estate-wide throughput degradation. Nothing failed — it just got slow."
+  causal_chain:
+    - { claim: "ref-data-service index rebuild on currency_ccy_idx started 18m before the alert", ledger_key: changes }
+    - { claim: "ref-data /v1/currencies p95 latency ~4.2s vs normally single-digit ms", ledger_key: rdmetrics }
+    - { claim: "ref-data logs: slow query, full index scan because currency_ccy_idx is unavailable during rebuild", ledger_key: rdlogs }
+    - { claim: "enrichment-service p95 ~4.8s and throughput down to ~35%, blocked on synchronous ref-data calls", ledger_key: enrmetrics }
+    - { claim: "ref-data schema unchanged — pure latency regression, not a data-contract break", ledger_key: diff }
+  remediation:
+    - "Confirm or expedite the currency_ccy_idx rebuild; if long-running, roll back to the pre-maintenance snapshot (awaiting human approval)"
+    - "Add a short-circuit timeout + stale-cache fallback on enrichment's ref-data currency lookup to avoid synchronous blocking"
+    - "Schedule index maintenance in a maintenance window with query-path failover"
+  ruled_out:
+    - "Schema drift: ref-data response shape unchanged"
+    - "trade-capture: baseline throughput and latency"
+    - "enrichment GC/resource saturation: latency is external-wait, not CPU"

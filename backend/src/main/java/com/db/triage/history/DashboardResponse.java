@@ -8,7 +8,11 @@ public record DashboardResponse(
 
         List<ChartEntry> categories,
 
-        List<ChartEntry> services
+        List<ChartEntry> services,
+
+        List<ChartEntry> trend,
+
+        List<ChartEntry> severity
 
 ) {
 

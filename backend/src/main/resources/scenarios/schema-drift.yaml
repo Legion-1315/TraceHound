@@ -1,6 +1,7 @@
 id: schema-drift
 name: "Schema Drift (primary demo)"
 description: "ref-data release renames a field; enrichment silently nulls currency; alert fires 3 hops away on the gateway"
+category: "Data Contract"
 alert_text: "ALERT [SEV2] regulatory-gateway: MiFID submission validation failure rate 34% over 10m window (threshold 5%). Rule RG-VAL-001. Validator: ESMA-RTS22."
 flow: mifid-reporting
 expected_root_cause: "ref-data-service release 2.4.1 renamed field 'ccy' to 'currencyCode', causing silent null currency enrichment and gateway validation failures"

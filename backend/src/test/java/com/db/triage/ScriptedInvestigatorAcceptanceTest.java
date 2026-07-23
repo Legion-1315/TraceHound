@@ -22,7 +22,8 @@ import static org.junit.jupiter.api.Assertions.*;
 @SpringBootTest(properties = {
         "triage.step-delay-min-ms=1",
         "triage.step-delay-max-ms=2",
-        "triage.memory-file=build/test-data/incident-memory.json"
+        "triage.memory-file=build/test-data/incident-memory.json",
+        "triage.history-file=build/test-data/incident-history.json"
 })
 class ScriptedInvestigatorAcceptanceTest {
 
@@ -63,6 +64,46 @@ class ScriptedInvestigatorAcceptanceTest {
         // gateway-local: blast radius should NOT implicate the confirmations flow
         assertTrue(report.blastRadius().stream().noneMatch(b -> b.flowId().equals("confirmations")));
         assertCitationsResolve("INC-T3", report);
+    }
+
+    @Test
+    void latencySpikeDiagnosesRefDataIndexRebuild() {
+        TriageReport report = run("latency-spike", "INC-T4");
+        String rc = report.rootCause().toLowerCase();
+        assertTrue(rc.contains("ref-data"), report.rootCause());
+        assertTrue(rc.contains("index"), report.rootCause());
+        assertEquals("Reference Data Platform", report.owningTeam());
+        assertCitationsResolve("INC-T4", report);
+    }
+
+    @Test
+    void duplicateTradesDiagnosesCaptureSideDuplication() {
+        TriageReport report = run("duplicate-trades", "INC-T5");
+        String rc = report.rootCause().toLowerCase();
+        assertTrue(rc.contains("trade-capture"), report.rootCause());
+        assertTrue(rc.contains("duplicate"), report.rootCause());
+        // the fault is at ingestion, not at the gateway that detected it
+        assertEquals("Front Office Integration", report.owningTeam());
+        assertCitationsResolve("INC-T5", report);
+    }
+
+    @Test
+    void threadPoolExhaustionDiagnosesBuilderResourceLimit() {
+        TriageReport report = run("thread-pool-exhaustion", "INC-T6");
+        String rc = report.rootCause().toLowerCase();
+        assertTrue(rc.contains("submission-builder"), report.rootCause());
+        assertTrue(rc.contains("pool"), report.rootCause());
+        assertCitationsResolve("INC-T6", report);
+    }
+
+    @Test
+    void everyScenarioDeclaresACategoryForAnalytics() {
+        for (ScenarioDef def : scenarios.all()) {
+            assertNotNull(def.category(), "scenario " + def.id() + " must declare a category");
+            assertFalse(def.category().isBlank(), "scenario " + def.id() + " category must not be blank");
+            assertNotNull(def.report().rootCauseService(),
+                    "scenario " + def.id() + " must declare a root_cause_service");
+        }
     }
 
     private TriageReport run(String scenarioId, String incidentId) {

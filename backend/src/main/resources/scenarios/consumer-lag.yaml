@@ -1,6 +1,7 @@
 id: consumer-lag
 name: "Consumer Stall"
 description: "enrichment's queue consumer stalls after a config reload; volume collapses downstream"
+category: "Messaging"
 alert_text: "ALERT [SEV1] regulatory-gateway: no MiFID submissions received for 9 minutes (expected ~400/min). Rule RG-VOL-002. Regulator SLA window closes in 41m."
 flow: mifid-reporting
 expected_root_cause: "enrichment-service queue consumer stalled after config reload 'te-enrich-tuning-0719'; trade flow halted upstream of submission building"

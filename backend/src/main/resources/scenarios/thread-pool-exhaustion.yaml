@@ -1,0 +1,131 @@
+id: thread-pool-exhaustion
+name: "Thread Pool Exhaustion"
+description: "a submission-builder deploy under-sizes the sealing pool; it saturates under load and chokes the flow mid-chain"
+category: "Infrastructure"
+alert_text: "ALERT [SEV1] submission-builder: RTS-22 report build latency p95 6.5s and 6% task timeouts over 10m. Rule SB-LAT-005. Downstream volume collapsing."
+flow: mifid-reporting
+expected_root_cause: "submission-builder Release 5.2.0 parallelised batch sealing with an under-sized thread pool (size=4); under normal load the pool saturates, tasks queue and time out, throttling the whole flow at the build stage"
+
+change_events:
+  - service: submission-builder
+    minutes_ago: 26
+    type: DEPLOYMENT
+    summary: "Release 5.2.0 — performance: batch sealing parallelised (sealing pool size=4)"
+    author: "k.tanaka"
+  - service: ref-data-service
+    minutes_ago: 70
+    type: DEPLOYMENT
+    summary: "Release 2.4.0 — routine dependency bumps, no API changes"
+    author: "j.mueller"
+
+injections:
+  - service: submission-builder
+    from_minutes_ago: 14
+    metric: { latency_ms: 6500, throughput_factor: 0.3, error_rate: 0.06 }
+    logs:
+      - { level: WARN, every_s: 5, message: "Sealing thread pool saturated: active=4/4 queued=1180, task wait ~6s (pool introduced in 5.2.0)" }
+      - { level: ERROR, every_s: 15, message: "Batch {seq} sealing task timed out after 8000ms; requeueing (pool starvation)" }
+  - service: regulatory-gateway
+    from_minutes_ago: 11
+    metric: { throughput_factor: 0.32 }
+    logs:
+      - { level: WARN, every_s: 20, message: "Submission arrivals down ~68%; no validation errors, upstream build stage suspected [RG-VOL-002]" }
+  - service: enrichment-service
+    from_minutes_ago: 12
+    logs:
+      - { level: WARN, every_s: 25, message: "Backpressure from submission-builder: enriched-trade handoff blocking, local buffer filling" }
+
+script:
+  - thought: "SEV1: submission-builder build latency and timeouts, downstream volume collapsing. Scoping the flow."
+    tool: get_topology
+    params: { flowId: mifid-reporting }
+    ledger_key: topo
+    inference: "Scope = trade-capture -> enrichment-service -> submission-builder -> regulatory-gateway. Timeouts + latency at the build stage point to a resource limit, not bad data."
+    node_status:
+      trade-capture: PROBING
+      ref-data-service: PROBING
+      enrichment-service: PROBING
+      submission-builder: PROBING
+      regulatory-gateway: PROBING
+
+  - thought: "Recent changes? Latency-plus-timeouts right after a perf deploy is a common anti-pattern."
+    tool: get_change_events
+    params: { minutes: 60 }
+    ledger_key: changes
+    inference: "submission-builder deployed 5.2.0 (parallelised sealing, pool size=4) 26m ago; symptom onset ~14m ago. A new fixed-size pool is a prime saturation suspect."
+
+  - tool: search_incident_memory
+    params: { symptoms: "submission builder latency timeouts thread pool saturated downstream volume collapse" }
+    ledger_key: memory
+    inference: "Checking for prior resource-exhaustion incidents."
+    hypotheses:
+      - { text: "submission-builder 5.2.0 under-sized sealing thread pool saturates", probability: 46 }
+      - { text: "Upstream enrichment slowdown starving builder input", probability: 22 }
+      - { text: "Builder host CPU/memory pressure", probability: 18 }
+      - { text: "Gateway backpressure stalling builder output", probability: 14 }
+
+  - thought: "Confirm the choke point: is the build stage itself slow, or just starved of input?"
+    tool: query_metrics
+    params: { serviceId: submission-builder }
+    ledger_key: sbmetrics
+    inference: "p95 ~6.5s, 6% timeouts, throughput down to ~30%. High latency WITH timeouts means the stage is doing work but starved of threads — an internal resource limit, not a lack of input."
+    node_status:
+      submission-builder: SUSPECT
+
+  - thought: "Is the builder actually being fed? Check enrichment output — if it's healthy, the builder is the bottleneck."
+    tool: query_metrics
+    params: { serviceId: enrichment-service }
+    ledger_key: enrmetrics
+    inference: "enrichment at baseline throughput and low latency — it is producing fine and backpressuring against the builder. The bottleneck is inside submission-builder, not upstream."
+    node_status:
+      enrichment-service: CLEARED
+    hypotheses:
+      - { text: "submission-builder 5.2.0 under-sized sealing thread pool saturates", probability: 72 }
+      - { text: "Builder host CPU/memory pressure", probability: 14 }
+      - { text: "Upstream enrichment slowdown starving builder input", probability: 8 }
+      - { text: "Gateway backpressure stalling builder output", probability: 6 }
+
+  - thought: "Read builder logs to pinpoint the resource that is exhausted."
+    tool: query_logs
+    params: { serviceId: submission-builder, minutes: 20 }
+    ledger_key: sblogs
+    inference: "'Sealing thread pool saturated: active=4/4 queued=1180' and 'task timed out ... pool starvation', explicitly attributing the pool to 5.2.0. The parallelisation shipped with too few threads. Root cause confirmed."
+    node_status:
+      submission-builder: ROOT_CAUSE
+
+  - thought: "Confirm downstream is a victim: the gateway should be starved, not failing."
+    tool: query_logs
+    params: { serviceId: regulatory-gateway, minutes: 15 }
+    ledger_key: gwlogs
+    inference: "Gateway reports low arrivals and zero validation errors — starved by the upstream build choke, not itself faulty."
+    node_status:
+      regulatory-gateway: CLEARED
+      trade-capture: CLEARED
+      ref-data-service: CLEARED
+    hypotheses:
+      - { text: "submission-builder 5.2.0 under-sized sealing thread pool saturates", probability: 92 }
+      - { text: "Builder host CPU/memory pressure", probability: 4 }
+      - { text: "Upstream enrichment slowdown starving builder input", probability: 2 }
+      - { text: "Gateway backpressure stalling builder output", probability: 2 }
+
+  - thought: "Causal chain verified — a mid-chain resource limit. Building the report."
+
+report:
+  root_cause: "submission-builder Release 5.2.0 parallelised batch sealing with a fixed thread pool of size 4. Under normal load the pool saturates (active=4/4, ~1180 queued), sealing tasks wait ~6s and time out at 8s (6% failures). The build stage throttles the entire MiFID flow, collapsing downstream submission volume."
+  root_cause_service: submission-builder
+  confidence: 92
+  summary: "A performance deploy shipped an under-sized worker pool. The bottleneck is mid-chain: enrichment feeds it fine and the gateway is merely starved. High latency combined with timeouts (not just low throughput) is the tell that the stage is resource-limited rather than input-starved."
+  causal_chain:
+    - { claim: "submission-builder deployed 5.2.0 (parallelised sealing, pool size=4) 26m before the alert", ledger_key: changes }
+    - { claim: "submission-builder p95 ~6.5s, 6% task timeouts, throughput down to ~30%", ledger_key: sbmetrics }
+    - { claim: "builder logs: sealing pool saturated active=4/4 queued=1180, tasks timing out (pool from 5.2.0)", ledger_key: sblogs }
+    - { claim: "enrichment-service at baseline — producing fine and backpressuring, so the choke is inside the builder", ledger_key: enrmetrics }
+    - { claim: "regulatory-gateway starved with zero validation errors — a victim of the build-stage choke", ledger_key: gwlogs }
+  remediation:
+    - "Increase the submission-builder sealing pool size (or make it adaptive) and redeploy; interim: roll back 5.2.0 to serial sealing (awaiting human approval)"
+    - "Drain the queued sealing backlog after the fix; verify no batches dropped on timeout requeue"
+    - "Add a load test gating perf deploys that changes pool sizing"
+  ruled_out:
+    - "enrichment-service: baseline throughput/latency, feeding the builder normally"
+    - "regulatory-gateway: starved of input, zero validation errors"
+    - "trade-capture / ref-data: not on the resource-contended path"

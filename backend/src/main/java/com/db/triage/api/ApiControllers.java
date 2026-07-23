@@ -1,6 +1,9 @@
 package com.db.triage.api;
 
 import com.db.triage.agent.InvestigationEventPublisher;
+import com.db.triage.history.DashboardResponse;
+import com.db.triage.history.IncidentHistory;
+import com.db.triage.history.IncidentHistoryService;
 import com.db.triage.incident.Incident;
 import com.db.triage.incident.IncidentService;
 import com.db.triage.ledger.EvidenceLedger;
@@ -25,15 +28,18 @@ public class ApiControllers {
     private final ScenarioService scenarios;
     private final SimulationEngine sim;
     private final InvestigationEventPublisher events;
+    private final IncidentHistoryService history;
 
     public ApiControllers(TopologyService topology, IncidentService incidents, EvidenceLedger ledger,
-                          ScenarioService scenarios, SimulationEngine sim, InvestigationEventPublisher events) {
+                          ScenarioService scenarios, SimulationEngine sim, InvestigationEventPublisher events,
+                          IncidentHistoryService history) {
         this.topology = topology;
         this.incidents = incidents;
         this.ledger = ledger;
         this.scenarios = scenarios;
         this.sim = sim;
         this.events = events;
+        this.history = history;
     }
 
     @GetMapping("/topology")
@@ -88,6 +94,18 @@ public class ApiControllers {
         return incidents.byId(id)
                 .<ResponseEntity<?>>map(i -> ResponseEntity.ok(events.historyFor(id)))
                 .orElse(ResponseEntity.notFound().build());
+    }
+
+    /** Aggregated dashboards for the Analytics tab. */
+    @GetMapping("/analytics")
+    public DashboardResponse analytics() {
+        return history.dashboard();
+    }
+
+    /** The raw historical incident corpus (seeded + every completed investigation). */
+    @GetMapping("/history")
+    public List<IncidentHistory> history() {
+        return history.all();
     }
 
     @GetMapping("/chaos")

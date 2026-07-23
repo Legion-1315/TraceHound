@@ -1,6 +1,7 @@
 id: cert-expiry
 name: "Certificate Expiry"
 description: "gateway's outbound TLS cert to the regulator expires — a gateway-local fault, no upstream involvement"
+category: "Infrastructure"
 alert_text: "ALERT [SEV2] regulatory-gateway: submission delivery failures 100% over 5m window. Transport errors to ARM endpoint. Rule RG-TLS-003."
 flow: mifid-reporting
 expected_root_cause: "regulatory-gateway outbound TLS client certificate expired; handshake to the ARM regulator endpoint fails — gateway-local fault"
