@@ -1,13 +1,5 @@
 name: Docker Push to Artifact Registry
 on:
-  push:
-    branches:
-      - master
-    paths:
-      - 'backend/**'
-      - 'frontend/**'
-      - 'Dockerfile'
-      - '.github/workflows/example_docker_push_to_artifact_registry.yml'
   workflow_dispatch:
 
 env:
