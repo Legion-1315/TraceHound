@@ -1,0 +1,143 @@
+name: Example - Deploy to OpenShift
+
+on:
+  # push:
+  # branches:
+  #   - main
+  # paths:
+  #   - 'openshift-api/**'
+  #   - '.github/workflows/deploy_openshift.yml'  
+  workflow_dispatch:
+
+env:
+  OPENSHIFT_SERVER: ${{ vars.OPENSHIFT_SERVER }}
+  OPENSHIFT_TOKEN: ${{ secrets.OPENSHIFT_TOKEN }}
+  OPENSHIFT_NAMESPACE: ${{ vars.OPENSHIFT_NAMESPACE }}
+  IMAGE_REGISTRY: ${{ vars.OPENSHIFT_REGISTRY }}
+  IMAGE_NAME: hackathon-api
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v2
+      with:
+        export_environment_variables: true
+        project_id: hack-team-code-catalyst
+        workload_identity_provider: projects/662541806905/locations/global/workloadIdentityPools/github-2026/providers/github-2026
+        service_account: infrastructure@hack-team-code-catalyst.iam.gserviceaccount.com
+    
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+    
+    - name: Create storage bucket and sample files
+      run: |
+        # Create bucket if it doesn't exist
+        BUCKET_NAME="hack-team-code-catalyst-openshift-demo"
+        if ! gcloud storage buckets describe "gs://${BUCKET_NAME}" 2>/dev/null; then
+          echo "Creating bucket gs://${BUCKET_NAME}"
+          gcloud storage buckets create "gs://${BUCKET_NAME}" \
+            --location=europe-west1 \
+            --uniform-bucket-level-access \
+            --public-access-prevention
+        else
+          echo "Bucket gs://${BUCKET_NAME} already exists"
+        fi
+        
+        # Create three unique hello world files
+        echo "Hello World from code-catalyst! (File 1) - Generated at $$(date)" > hello1.txt
+        echo "Hello World from code-catalyst! (File 2) - Generated at $$(date)" > hello2.txt
+        echo "Hello World from code-catalyst! (File 3) - Generated at $$(date)" > hello3.txt
+        
+        # Upload files to bucket
+        gcloud storage cp hello1.txt hello2.txt hello3.txt "gs://${BUCKET_NAME}/"
+        
+        # List uploaded files
+        echo "Files in bucket:"
+        gcloud storage ls "gs://${BUCKET_NAME}/"
+        
+        # Export bucket name for later use
+        echo "BUCKET_NAME=${BUCKET_NAME}" >> $$GITHUB_ENV
+    
+    - name: Install OpenShift CLI
+      run: |
+        curl -LO https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.17.0/openshift-client-linux.tar.gz
+        tar -xzf openshift-client-linux.tar.gz
+        sudo mv oc /usr/local/bin/
+        oc version --client
+    
+    - name: Login to OpenShift
+      run: |
+        oc login --token=${{ env.OPENSHIFT_TOKEN }} --server=${{ env.OPENSHIFT_SERVER }}
+        oc project ${{ env.OPENSHIFT_NAMESPACE }}
+    
+    - name: Build and push image
+      run: |
+        # Build the Docker image
+        cd openshift-api
+        
+        # Use OpenShift's internal registry
+        oc new-build --name=${{ env.IMAGE_NAME }} --binary --strategy=docker || true
+        
+        # Start build from local directory
+        oc start-build ${{ env.IMAGE_NAME }} --from-dir=. --follow
+        
+        # Wait for build to complete
+        oc wait --for=condition=Complete --timeout=600s build -l buildconfig=${{ env.IMAGE_NAME }}
+    
+    - name: Deploy application
+      run: |
+        # Apply deployment manifest
+        cd openshift-api
+        oc apply -f deployment.yaml
+        
+        # Update deployment with latest image
+        oc set image deployment/${{ env.IMAGE_NAME }} ${{ env.IMAGE_NAME }}=image-registry.openshift-image-registry.svc:5000/${{ env.OPENSHIFT_NAMESPACE }}/${{ env.IMAGE_NAME }}:latest
+        
+        # Wait for rollout to complete
+        oc rollout status deployment/${{ env.IMAGE_NAME }} --timeout=300s
+    
+    - name: Get route URL
+      run: |
+        ROUTE_URL=$(oc get route ${{ env.IMAGE_NAME }} -o jsonpath='{.spec.host}')
+        echo "Application deployed to: https://${ROUTE_URL}"
+        echo "ROUTE_URL=${ROUTE_URL}" >> $GITHUB_ENV
+    
+    - name: Test deployment
+      run: |
+        # Wait for application to be ready
+        sleep 10
+        
+        # Test health endpoint
+        echo "Testing health endpoint..."
+        curl -k https://${ROUTE_URL} || exit 1
+        
+        # Check debug endpoint for diagnostics
+        echo -e "\n\nChecking debug endpoint..."
+        curl -k https://${ROUTE_URL}/debug | jq . || true
+        
+        # Test files endpoint (allow failure for now due to WIF setup)
+        echo -e "\n\nTesting files endpoint..."
+        curl -k https://${ROUTE_URL}/files || true
+        
+        # Test getting a specific file (allow failure for now due to WIF setup)
+        echo -e "\n\nTesting file retrieval..."
+        curl -k https://${ROUTE_URL}/file/hello1.txt || true
+        
+        echo -e "\n\nDeployment successful! Check debug output above for WIF configuration status."
+    
+    - name: Run WIF diagnostic test
+      run: |
+        echo "Running WIF diagnostic test in pod..."
+        oc exec -n ${{ env.OPENSHIFT_NAMESPACE }} deployment/${{ env.IMAGE_NAME }} -- python /app/test-wif.py || true
+        
+        echo -e "\n\nNote: WIF authentication errors are expected until the Terraform configuration is fully applied."

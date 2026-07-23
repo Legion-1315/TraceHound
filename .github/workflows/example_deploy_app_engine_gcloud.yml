@@ -1,0 +1,62 @@
+name: Example - Deploy App Engine using gcloud
+on:
+  workflow_dispatch:
+
+jobs:
+  example:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+      # actions/checkout MUST come before auth
+      - name: 'Checkout'
+        uses: 'actions/checkout@v4'
+        with:
+          repository: GoogleCloudPlatform/python-docs-samples  # Taken from https://cloud.google.com/appengine/docs/standard/python3/building-app
+
+      - name: 'Authenticate to GCP as Infrastructure SA for deployment'
+        uses: 'google-github-actions/auth@v2'
+        with:
+          export_environment_variables: true
+          project_id : hack-team-code-catalyst
+          workload_identity_provider: projects/662541806905/locations/global/workloadIdentityPools/github-2026/providers/github-2026
+          service_account: infrastructure@hack-team-code-catalyst.iam.gserviceaccount.com # Use your Infrastructure SA to manage resources
+
+      - name: 'Set up Cloud SDK'
+        uses: 'google-github-actions/setup-gcloud@v2'
+
+      # Only needed for first run
+      - name: 'Create App Environment'
+        env:
+          PROJECT_ID: hack-team-code-catalyst
+          WORKLOAD_SA_EMAIL: workload@hack-team-code-catalyst.iam.gserviceaccount.com
+        run: |
+          if gcloud app describe --project="${PROJECT_ID}" &> /dev/null; then
+            gcloud app update \
+              --service-account="${WORKLOAD_SA_EMAIL}"  # Use your Workload SA to attach to resources
+          else
+            gcloud app create \
+              --region=europe-west \
+              --service-account="${WORKLOAD_SA_EMAIL}"  # Use your Workload SA to attach to resources
+          fi
+
+      - name: 'Deploy App Engine'
+        id: deploy
+        env:
+          WORKLOAD_SA_EMAIL: workload@hack-team-code-catalyst.iam.gserviceaccount.com
+        run: |
+          set -e
+          
+          cd "appengine/standard_python3/building-an-app/building-an-app-1"
+          gcloud app deploy \
+            --service-account="${WORKLOAD_SA_EMAIL}"  # Use your Workload SA to attach to resources
+          
+          url=$(gcloud app describe --format="value(defaultHostname)")
+          echo "url=${url}" >> "${GITHUB_OUTPUT}"
+
+      # Example of using the output
+      - name: 'Poke App Engine'
+        run: 'curl "${{ steps.deploy.outputs.url }}"'

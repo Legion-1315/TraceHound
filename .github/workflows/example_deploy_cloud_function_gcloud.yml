@@ -1,0 +1,69 @@
+name: Example - Deploy a Gen2 Cloud Function using gcloud
+on:
+  workflow_dispatch:
+
+jobs:
+  example:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+      # actions/checkout MUST come before auth
+      - name: 'Checkout'
+        uses: 'actions/checkout@v4'
+        with:
+          repository: GoogleCloudPlatform/python-docs-samples  # Taken from https://cloud.google.com/functions/docs/create-deploy-gcloud#functions-prepare-environment-python
+
+      - name: 'Authenticate to GCP as Infrastructure SA for deployment'
+        uses: 'google-github-actions/auth@v2'
+        with:
+          export_environment_variables: true
+          project_id : hack-team-code-catalyst
+          workload_identity_provider: projects/662541806905/locations/global/workloadIdentityPools/github-2026/providers/github-2026
+          service_account: infrastructure@hack-team-code-catalyst.iam.gserviceaccount.com  # Use your Infrastructure SA to manage resources
+
+      - name: 'Set up Cloud SDK'
+        uses: 'google-github-actions/setup-gcloud@v2'
+
+      - name: 'Deploy Gen2 Cloud Function'
+        id: deploy
+        env:
+          FUNCTION_NAME: 'github-python-http-function'
+          REGION: 'europe-west1'
+          WORKLOAD_SA_EMAIL: workload@hack-team-code-catalyst.iam.gserviceaccount.com
+          WORKLOAD_SA_ID: projects/hack-team-code-catalyst/serviceAccounts/workload@hack-team-code-catalyst.iam.gserviceaccount.com
+        run: |
+          set -e
+          
+          gcloud functions deploy "${FUNCTION_NAME}" \
+              --build-service-account="${WORKLOAD_SA_ID}" \
+              --entry-point="hello_get" \
+              --gen2 \
+              --region="${REGION}" \
+              --runtime="python311" \
+              --service-account="${WORKLOAD_SA_EMAIL}" \
+              --source="functions/helloworld" \
+              --trigger-http
+            # If using EventArc triggers, also set '--trigger-service-account="${WORKLOAD_SA_EMAIL}"'
+            # Note '--build-service-account' uses the ID format ("projects/.../serviceAccount/workload@..."), not email (workload@...)            
+          
+          url=$(gcloud functions describe "${FUNCTION_NAME}" --gen2 --region="${REGION}" --format="value(serviceConfig.uri)")
+          echo "url=${url}" >> "${GITHUB_OUTPUT}"
+
+      # Only needed to get an ID token to simulate an authenticated curl call.
+      # Not needed for deployment.
+      - name: 'Authenticate to GCP as workload SA for invocation'
+        id: 'auth'
+        uses: 'google-github-actions/auth@v2'
+        with:
+          token_format: 'id_token'
+          workload_identity_provider: projects/662541806905/locations/global/workloadIdentityPools/github-2026/providers/github-2026
+          service_account: workload@hack-team-code-catalyst.iam.gserviceaccount.com  # Use your Workload SA to interact with resources
+          id_token_audience: ${{ steps.deploy.outputs.url }}
+          id_token_include_email: true
+
+      - name: 'Poke Cloud Run'
+        run: 'curl -H "Authorization: Bearer ${{ steps.auth.outputs.id_token }}" "${{ steps.deploy.outputs.url }}"'

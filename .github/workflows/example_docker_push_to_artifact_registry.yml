@@ -1,0 +1,55 @@
+name: Example - Docker Push to Artifact Registry
+on:
+  workflow_dispatch:
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+      # actions/checkout MUST come before auth
+      - name: 'Checkout'
+        uses: 'actions/checkout@v4'
+
+      - name: 'Authenticate to GCP as workload SA for docker push to artifact registry'
+        uses: 'google-github-actions/auth@v2'
+        with:
+          export_environment_variables: true
+          project_id : hack-team-code-catalyst
+          workload_identity_provider: projects/662541806905/locations/global/workloadIdentityPools/github-2026/providers/github-2026
+          service_account: workload@hack-team-code-catalyst.iam.gserviceaccount.com  # Use your Infrastructure SA to manage resources
+          
+      - name: 'Set up Cloud SDK'
+        uses: 'google-github-actions/setup-gcloud@v2'
+
+      - name: 'Create Artifact Registry repository'
+        run: |            
+            if gcloud artifacts repositories describe helloworld --location=us-central1 &> /dev/null; then
+                echo "Artifact Registry repository 'helloworld' already exists"
+            else
+                gcloud artifacts repositories create helloworld --location=us-central1 --repository-format=docker
+            fi
+
+        # https://cloud.google.com/artifact-registry/docs/docker/pushing-and-pulling#cred-helper
+        # Play it safe - explicitly configure your intended registry host
+      - name: 'docker config'
+        run: 'gcloud auth configure-docker us-central1-docker.pkg.dev'
+
+      - name: 'Synthesise Dockerfile'
+        run: |
+            set -e
+            mkdir -p hello_world
+            cat << EOF > hello_world/Dockerfile
+            FROM alpine:latest
+            RUN echo "Howdy!" 
+            EOF
+
+      - name: 'Build Image'
+        run: docker build -t us-central1-docker.pkg.dev/hack-team-code-catalyst/helloworld/helloworld ./hello_world
+
+      - name: 'Push Image'
+        run: docker push us-central1-docker.pkg.dev/hack-team-code-catalyst/helloworld/helloworld

@@ -1,0 +1,58 @@
+name: Example - Deploy Cloud Run using gcloud
+on:
+  workflow_dispatch:
+
+jobs:
+  example:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+      # actions/checkout MUST come before auth
+      - name: 'Checkout'
+        uses: 'actions/checkout@v4'
+
+      - name: 'Authenticate to GCP as Infrastructure SA for deployment'
+        uses: 'google-github-actions/auth@v2'
+        with:
+          export_environment_variables: true
+          project_id : hack-team-code-catalyst
+          workload_identity_provider: projects/662541806905/locations/global/workloadIdentityPools/github-2026/providers/github-2026
+          service_account: infrastructure@hack-team-code-catalyst.iam.gserviceaccount.com  # Use your Infrastructure SA to manage resources
+
+      - name: 'Set up Cloud SDK'
+        uses: 'google-github-actions/setup-gcloud@v2'
+
+      - name: 'Deploy Cloud Run'
+        id: deploy
+        env:
+          REGION: 'europe-west1'
+          SERVICE_NAME: 'github-cloud-run-service'
+          WORKLOAD_SA_EMAIL: workload@hack-team-code-catalyst.iam.gserviceaccount.com
+        run: |
+          set -e
+          gcloud run deploy "${SERVICE_NAME}" \
+            --region "${REGION}" \
+            --image "gcr.io/cloudrun/hello" \
+            --service-account="${WORKLOAD_SA_EMAIL}"  # Use your Workload SA to attach to resources
+          
+          url=$(gcloud run services describe "${SERVICE_NAME}" --region="${REGION}" --format="value(status.url)")
+          echo "url=${url}" >> "${GITHUB_OUTPUT}"
+
+      # Only needed to get an ID token to simulate an authenticated curl call.
+      # Not needed for deployment.
+      - name: 'Authenticate to GCP as workload SA for invocation'
+        id: 'auth'
+        uses: 'google-github-actions/auth@v2'
+        with:
+          token_format: 'id_token'
+          workload_identity_provider: projects/662541806905/locations/global/workloadIdentityPools/github-2026/providers/github-2026
+          service_account: workload@hack-team-code-catalyst.iam.gserviceaccount.com  # Use your Workload SA to interact with resources
+          id_token_audience: ${{ steps.deploy.outputs.url }}
+          id_token_include_email: true
+
+      - name: 'Poke Cloud Run'
+        run: 'curl -H "Authorization: Bearer ${{ steps.auth.outputs.id_token }}" "${{ steps.deploy.outputs.url }}"'

@@ -1,0 +1,8 @@
+{
+    "autoAccept": true,
+    "contextFileName": "CLAUDE.md",
+    "telemetry": {
+        "enabled": false
+    },
+    "usageStatisticsEnabled": false
+}
