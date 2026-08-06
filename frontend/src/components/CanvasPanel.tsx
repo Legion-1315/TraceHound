@@ -48,7 +48,7 @@ const POSITIONS: Record<string, { x: number; y: number }> = {
 }
 
 export default function CanvasPanel() {
-  const { topology, nodeStatus, activeScenario, scenarios, replayIndex } = useTriageStore()
+  const { topology, nodeStatus, replayIndex } = useTriageStore()
   const wrapperRef = useRef<HTMLDivElement>(null)
   const flowRef = useRef<ReactFlowInstance<Node, Edge> | null>(null)
 
@@ -68,9 +68,6 @@ export default function CanvasPanel() {
       observer.disconnect()
     }
   }, [])
-
-  const flowName = topology?.flows.find((f) => f.id === 'mifid-reporting')?.name ?? ''
-  const scenarioName = scenarios.find((s) => s.id === activeScenario)?.name
 
   const nodes: Node[] = useMemo(() => {
     if (!topology) return []
@@ -111,13 +108,8 @@ export default function CanvasPanel() {
     <div ref={wrapperRef} className="relative h-full" data-tour="canvas">
       <div className="absolute left-3 top-3 z-10 flex items-center gap-2">
         <span className="rounded-full border border-sky-800 bg-sky-950/80 px-3 py-1 text-xs font-semibold text-sky-300">
-          {flowName || 'Business flow'}
+          Business flow
         </span>
-        {scenarioName && (
-          <span className="rounded-full border border-rose-900 bg-rose-950/80 px-3 py-1 text-[11px] text-rose-300">
-            fault armed: {scenarioName}
-          </span>
-        )}
         {replayIndex !== null && (
           <span className="rounded-full border border-violet-800 bg-violet-950/80 px-3 py-1 text-[11px] text-violet-300">
             REPLAY MODE

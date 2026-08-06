@@ -10,7 +10,6 @@ export type RightTab = 'Hypotheses' | 'Report' | 'Replay' | 'Analytics'
 interface TriageState {
   topology: Topology | null
   scenarios: ScenarioInfo[]
-  activeScenario: string
   incidentId: string | null
   mode: string
   running: boolean
@@ -23,7 +22,6 @@ interface TriageState {
   ledger: LedgerEntry[]
   replayEvents: InvestigationEvent[]
   replayIndex: number | null
-  chaosOpen: boolean
   ticketOpen: boolean
   activeTab: RightTab
 
@@ -33,12 +31,10 @@ interface TriageState {
 
   setTopology: (t: Topology) => void
   setScenarios: (s: ScenarioInfo[], active: string) => void
-  setActiveScenario: (id: string) => void
   beginIncident: (incidentId: string, mode: string) => void
   applyEvent: (e: InvestigationEvent) => void
   completeIncident: (report: TriageReport, ledger: LedgerEntry[], events: InvestigationEvent[]) => void
   setReplayIndex: (i: number | null) => void
-  setChaosOpen: (open: boolean) => void
   setTicketOpen: (open: boolean) => void
   setActiveTab: (t: RightTab) => void
   resetInvestigation: () => void
@@ -72,8 +68,6 @@ let currentUnsubscribe: (() => void) | null = null
 export const useTriageStore = create<TriageState>((set, get) => ({
   topology: null,
   scenarios: [],
-  activeScenario: '',
-  chaosOpen: false,
   ticketOpen: false,
   activeTab: 'Hypotheses',
   tourActive: false,
@@ -81,8 +75,7 @@ export const useTriageStore = create<TriageState>((set, get) => ({
   ...emptyInvestigation,
 
   setTopology: (topology) => set({ topology }),
-  setScenarios: (scenarios, activeScenario) => set({ scenarios, activeScenario }),
-  setActiveScenario: (activeScenario) => set({ activeScenario }),
+  setScenarios: (scenarios) => set({ scenarios }),
 
   beginIncident: (incidentId, mode) =>
     set({ ...emptyInvestigation, incidentId, mode, running: true, startedAt: Date.now() }),
@@ -116,7 +109,6 @@ export const useTriageStore = create<TriageState>((set, get) => ({
       return { replayIndex, ...reconstruct(s.replayEvents, replayIndex + 1) }
     }),
 
-  setChaosOpen: (chaosOpen) => set({ chaosOpen }),
   setTicketOpen: (ticketOpen) => set({ ticketOpen }),
   setActiveTab: (activeTab) => set({ activeTab }),
   resetInvestigation: () => set({ ...emptyInvestigation, activeTab: 'Hypotheses' }),
@@ -124,7 +116,6 @@ export const useTriageStore = create<TriageState>((set, get) => ({
   startInvestigation: async (alertText) => {
     if (get().running) return
     const { incidentId, mode, scenarioId } = await api.startIncident(alertText)
-    set({ activeScenario: scenarioId })
     get().beginIncident(incidentId, mode)
     currentUnsubscribe?.()
     currentUnsubscribe = subscribeToInvestigation(incidentId, (e) => {

@@ -13,12 +13,6 @@ export const api = {
 
   chaosState: () => get<{ scenarios: ScenarioInfo[]; active: string }>('/api/chaos'),
 
-  activateScenario: async (id: string) => {
-    const res = await fetch(`/api/chaos/${id}`, { method: 'POST' })
-    if (!res.ok) throw new Error(`chaos activate failed: ${res.status}`)
-    return res.json() as Promise<{ active: string }>
-  },
-
   startIncident: async (alertText: string) => {
     const res = await fetch('/api/incidents', {
       method: 'POST',

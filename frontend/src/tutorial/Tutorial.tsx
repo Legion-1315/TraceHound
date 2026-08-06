@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTriageStore } from '../store'
-import { api } from '../api'
 import { TUTORIAL_STEPS, type Step, type TourAction } from './steps'
 
 type Rect = { top: number; left: number; width: number; height: number }
@@ -11,7 +10,6 @@ const TOOLTIP_PAD = 12
 export default function Tutorial() {
   const {
     tourActive, tourStep, nextStep, prevStep, endTour, report, setActiveTab, startInvestigation,
-    setActiveScenario, setChaosOpen,
   } = useTriageStore()
 
   const step: Step | undefined = tourActive ? TUTORIAL_STEPS[tourStep] : undefined
@@ -20,27 +18,18 @@ export default function Tutorial() {
 
   const runAction = useCallback(async (action: TourAction) => {
     switch (action.kind) {
-      case 'arm-fault': {
-        const res = await api.activateScenario(action.scenarioId)
-        setActiveScenario(res.active)
+      case 'arm-fault':
         break
-      }
       case 'start-investigation':
         await startInvestigation(action.alertText)
         break
       case 'switch-tab':
         setActiveTab(action.tab)
         break
-      case 'open-chaos':
-        setChaosOpen(true)
-        break
-      case 'close-chaos':
-        setChaosOpen(false)
-        break
       case 'wait-for-report':
         break
     }
-  }, [setActiveScenario, setActiveTab, setChaosOpen, startInvestigation])
+  }, [setActiveTab, startInvestigation])
 
   // Run the step's onEnter action exactly once per step entry.
   useEffect(() => {

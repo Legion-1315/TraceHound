@@ -5,8 +5,6 @@ export type TourAction =
   | { kind: 'start-investigation'; alertText: string }
   | { kind: 'switch-tab'; tab: RightTab }
   | { kind: 'wait-for-report' }
-  | { kind: 'open-chaos' }
-  | { kind: 'close-chaos' }
 
 export type Step = {
   /** data-tour attribute of the highlighted element, or "none" for a centered card with no spotlight. */
@@ -149,9 +147,9 @@ export const TUTORIAL_STEPS: Step[] = [
   },
   {
     target: 'none',
-    title: "One more thing — the chaos panel",
+    title: "That's the tour!",
     body:
-      "Press Ctrl+Shift+K anytime to open the chaos panel and arm a different fault (a stalled consumer, an expired TLS cert). " +
-      "Try Certificate Expiry to see the agent NOT blame the coincidental recent deployment — resisting a real-world false-positive pattern. That's the tour. Enjoy.",
+      "Try the other preset alerts to see the agent diagnose different faults — a stalled consumer, an expired TLS cert, and more. " +
+      "Certificate Expiry is a great one: the agent does NOT blame the coincidental recent deployment, resisting a real-world false-positive pattern. Enjoy.",
   },
 ]

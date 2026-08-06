@@ -4,7 +4,6 @@ import { api } from './api'
 import ChatPanel from './components/ChatPanel'
 import CanvasPanel from './components/CanvasPanel'
 import RightPanel from './components/RightPanel'
-import ChaosPanel from './components/ChaosPanel'
 import TicketModal from './components/TicketModal'
 import PanelDivider from './components/PanelDivider'
 import Footer from './components/Footer'
@@ -53,7 +52,7 @@ function loadPanels(): PanelWidths {
 
 export default function App() {
   const {
-    setTopology, setScenarios, chaosOpen, setChaosOpen, ticketOpen,
+    setTopology, setScenarios, ticketOpen,
     tourActive, startTour, endTour,
   } = useTriageStore()
   const [promptFirstRun, setPromptFirstRun] = useState(false)
@@ -79,7 +78,7 @@ export default function App() {
 
   useEffect(() => {
     api.topology().then(setTopology).catch(console.error)
-    api.chaosState().then((s) => setScenarios(s.scenarios, s.active)).catch(console.error)
+    api.chaosState().then((s) => setScenarios(s.scenarios, '')).catch(console.error)
     // Offer the tour on the user's first visit only.
     try {
       if (!localStorage.getItem(TOUR_SEEN_KEY)) {
@@ -90,17 +89,13 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'k') {
-        e.preventDefault()
-        setChaosOpen(!useTriageStore.getState().chaosOpen)
-      }
       if (e.key === 'Escape' && useTriageStore.getState().tourActive) {
         endTour()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [setChaosOpen, endTour])
+  }, [endTour])
 
   function launchTour() {
     try { localStorage.setItem(TOUR_SEEN_KEY, '1') } catch { /* noop */ }
@@ -130,7 +125,6 @@ export default function App() {
           >
             {tourActive ? 'Tour running…' : '★ Take the tour'}
           </button>
-          <span className="text-[11px] text-slate-600">Ctrl+Shift+K — chaos panel</span>
         </div>
       </header>
 
@@ -167,7 +161,6 @@ export default function App() {
       </main>
 
       <Footer />
-      {chaosOpen && <ChaosPanel />}
       {ticketOpen && <TicketModal />}
       {tourActive && <Tutorial />}
 
