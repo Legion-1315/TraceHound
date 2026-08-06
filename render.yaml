@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: code-catalyst
+    env: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /
+    envVars:
+      - key: TRIAGE_MODE
+        value: scripted

@@ -115,7 +115,7 @@ export const useTriageStore = create<TriageState>((set, get) => ({
 
   startInvestigation: async (alertText) => {
     if (get().running) return
-    const { incidentId, mode, scenarioId } = await api.startIncident(alertText)
+    const { incidentId, mode } = await api.startIncident(alertText)
     get().beginIncident(incidentId, mode)
     currentUnsubscribe?.()
     currentUnsubscribe = subscribeToInvestigation(incidentId, (e) => {

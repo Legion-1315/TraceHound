@@ -108,6 +108,36 @@ also resets the learning-loop demo beat. `--min-instances 1` keeps this from bit
 durable history, point `TRIAGE_HISTORY_FILE` / `TRIAGE_MEMORY_FILE` at a GCS bucket mounted with
 gcsfuse (Cloud Run volume mounts), or move the two stores to Firestore.
 
+## Deploy to Render (free)
+
+A `render.yaml` blueprint is included — Render builds straight from the existing `Dockerfile`,
+no changes needed. `server.port` already reads Render's injected `$PORT` the same way it reads
+Cloud Run's.
+
+1. Push this repo to GitHub (already done if you're reading this from the repo).
+2. In the Render dashboard: **New +** → **Blueprint** → connect this repo → Render detects
+   `render.yaml` and provisions a free web service named `code-catalyst`.
+3. First deploy takes ~3-5 min (Docker multi-stage build: Node build stage + Gradle build stage).
+   Later deploys only rebuild what changed.
+4. Open the assigned `https://code-catalyst-xxxx.onrender.com` URL once the deploy finishes.
+
+`TRIAGE_MODE=scripted` (the default, no API key needed) is already set in `render.yaml` — no
+manual environment setup required for a demo.
+
+### Caveat: free tier sleeps + ephemeral state
+
+Render's free tier spins the service down after ~15 minutes of no traffic; the next request
+triggers a cold start (~30-60s). Like Cloud Run, `data/incident-history.json` and
+`data/incident-memory.json` live on the container's filesystem, so a cold start or redeploy resets
+the analytics corpus and wipes learned incident memory — same caveat as Cloud Run, just triggered
+by inactivity instead of scale-to-zero. Load the app a minute or two before a live demo to warm it up.
+
+### LLM mode on Render
+
+Set `TRIAGE_MODE=llm` and `ANTHROPIC_API_KEY` as environment variables in the Render dashboard
+(**Environment** tab on the service) — never commit them to `render.yaml` or any other file in
+the repo.
+
 ### Optional: frontend dev server (hot reload)
 
 Only needed when iterating on UI code and you want HMR. Run the backend as above, then:
@@ -120,25 +150,24 @@ cd frontend && npm run dev     # :5173, proxies /api and /ws to :8080
 
 1. **Set the scene** (30s): point at the topology canvas — six services, two business flows.
    "MiFID Transaction Reporting" is the regulatory-critical path.
-2. **Arm the fault** (15s): press **Ctrl+Shift+K** → chaos panel → pick **Schema Drift** → close.
-   Telemetry across the estate rewrites instantly. (Let a judge pick the fault here if they want.)
-3. **Start the investigation** (10s): click the **Schema Drift** preset alert button, then
-   **Start investigation**. Note the alert fires on the *gateway* — three hops from the true cause.
-4. **Narrate the canvas** (60s): nodes pulse blue as the agent probes, turn green when cleared,
+2. **Start the investigation** (15s): click the **Schema Drift** preset alert button, then
+   **Start investigation** — this fills the alert and arms the matching fault's telemetry in one
+   motion. Note the alert fires on the *gateway* — three hops from the true cause.
+3. **Narrate the canvas** (60s): nodes pulse blue as the agent probes, turn green when cleared,
    amber when suspect. Watch the hypothesis bars re-rank live as evidence arrives. The agent walks
    *upstream* from the symptom — gateway → builder → enrichment → ref-data — and flags
    **ref-data-service red: ROOT CAUSE** (a field rename in release 2.4.1).
-5. **Show the report** (60s): Report tab — root cause with confidence %, an evidence chain where
+4. **Show the report** (60s): Report tab — root cause with confidence %, an evidence chain where
    every link expands to the cited ledger entry, blast radius (the Trade Confirmations flow is also
    exposed — computed from the topology, not guessed), remediation drafts **awaiting human
    approval**, and a pre-filled mock JIRA issue.
-6. **The kicker — the learning loop** (45s): run the same Schema Drift alert **again**. The agent
+5. **The kicker — the learning loop** (45s): run the same Schema Drift alert **again**. The agent
    finds the past incident in memory, skips the broad sweep, and verifies the known cause directly:
    ~5 tool calls / ~6s instead of ~9 calls / ~11s. "It gets faster every incident it sees."
-7. **Prove it's not a one-trick pony** (60s): chaos panel → **Certificate Expiry** → run its preset
-   alert. The agent clears every upstream service and concludes *gateway-local* — explicitly
-   resisting the reflex to blame the most recent deployment.
-8. **Close on trust** (15s): footer — elapsed time, tool calls, **PII items redacted** before any
+6. **Prove it's not a one-trick pony** (45s): click the **Certificate Expiry** preset alert, then
+   **Start investigation**. The agent clears every upstream service and concludes *gateway-local* —
+   explicitly resisting the reflex to blame the most recent deployment.
+7. **Close on trust** (15s): footer — elapsed time, tool calls, **PII items redacted** before any
    telemetry reached the agent. Replay tab scrubs back through every step after the fact.
 
 ## The six fault scenarios
