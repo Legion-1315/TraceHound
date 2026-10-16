@@ -1,0 +1,59 @@
+# Faults that can be injected into the LIVE estate (TRIAGE_ESTATE=live).
+# Each action calls POST /chaos/{fault} on a real service. The agent never sees this file:
+# it only sees what the broken behaviour does to logs, metrics, changes and schemas.
+# expected_* fields are used by the eval harness to grade the agent's report.
+faults:
+  - id: schema-drift
+    name: "Schema Drift"
+    category: "Data Contract"
+    description: "ref-data release renames the currency field; enrichment silently nulls currency; the gateway rejects submissions three hops away"
+    actions:
+      - { service: ref-data-service, fault: schema-drift }
+    expected_root_cause_service: ref-data-service
+    expected_keywords: [ccy, currencyCode]
+
+  - id: consumer-lag
+    name: "Consumer Lag"
+    category: "Messaging"
+    description: "a config reload leaves enrichment's consumer group fetching zero records; volume dies downstream"
+    actions:
+      - { service: enrichment-service, fault: consumer-lag }
+    expected_root_cause_service: enrichment-service
+    expected_keywords: [consumer, poll]
+
+  - id: cert-expiry
+    name: "Certificate Expiry"
+    category: "Infrastructure"
+    description: "the gateway's mTLS client certificate has expired; a harmless deployment on submission-builder happens at the same time"
+    actions:
+      - { service: submission-builder, fault: benign-deploy }
+      - { service: regulatory-gateway, fault: cert-expiry }
+    expected_root_cause_service: regulatory-gateway
+    expected_keywords: [certificate]
+
+  - id: latency-spike
+    name: "Latency Spike"
+    category: "Performance"
+    description: "an online index rebuild slows ref-data currency lookups; enrichment slows with zero errors"
+    actions:
+      - { service: ref-data-service, fault: latency-spike }
+    expected_root_cause_service: ref-data-service
+    expected_keywords: [index]
+
+  - id: duplicate-trades
+    name: "Duplicate Trades"
+    category: "Data Consistency"
+    description: "a fast-path batching flag makes trade-capture publish every trade twice; the gateway rejects the duplicates"
+    actions:
+      - { service: trade-capture, fault: duplicate-trades }
+    expected_root_cause_service: trade-capture
+    expected_keywords: [duplicate]
+
+  - id: thread-pool-exhaustion
+    name: "Thread Pool Exhaustion"
+    category: "Infrastructure"
+    description: "a submission-builder release shrinks the sealing pool and slows sealing; the queue fills and reports are rejected"
+    actions:
+      - { service: submission-builder, fault: thread-pool-exhaustion }
+    expected_root_cause_service: submission-builder
+    expected_keywords: [pool]

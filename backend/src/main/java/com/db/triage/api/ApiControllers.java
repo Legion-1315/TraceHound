@@ -1,6 +1,15 @@
 package com.db.triage.api;
 
 import com.db.triage.agent.InvestigationEventPublisher;
+import com.db.triage.agent.LlmInvestigator;
+import com.db.triage.alerts.AlertMonitor;
+import com.db.triage.live.LiveChaosService;
+import com.db.triage.live.LiveFaultCatalog;
+import com.db.triage.llm.LlmBudget;
+import com.db.triage.telemetry.LiveEstateClient;
+import com.db.triage.telemetry.TelemetryRouter;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Value;
 import com.db.triage.history.DashboardResponse;
 import com.db.triage.history.IncidentHistory;
 import com.db.triage.history.IncidentHistoryService;
@@ -15,6 +24,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -29,10 +39,21 @@ public class ApiControllers {
     private final SimulationEngine sim;
     private final InvestigationEventPublisher events;
     private final IncidentHistoryService history;
+    private final TelemetryRouter telemetry;
+    private final LiveEstateClient estate;
+    private final LiveFaultCatalog liveFaults;
+    private final LiveChaosService liveChaos;
+    private final AlertMonitor alerts;
+    private final LlmInvestigator llm;
+    private final LlmBudget budget;
+    private final boolean trustForwardedFor;
 
     public ApiControllers(TopologyService topology, IncidentService incidents, EvidenceLedger ledger,
                           ScenarioService scenarios, SimulationEngine sim, InvestigationEventPublisher events,
-                          IncidentHistoryService history) {
+                          IncidentHistoryService history, TelemetryRouter telemetry, LiveEstateClient estate,
+                          LiveFaultCatalog liveFaults, LiveChaosService liveChaos, AlertMonitor alerts,
+                          LlmInvestigator llm, LlmBudget budget,
+                          @Value("${triage.trust-forwarded-for:false}") boolean trustForwardedFor) {
         this.topology = topology;
         this.incidents = incidents;
         this.ledger = ledger;
@@ -40,6 +61,41 @@ public class ApiControllers {
         this.sim = sim;
         this.events = events;
         this.history = history;
+        this.telemetry = telemetry;
+        this.estate = estate;
+        this.liveFaults = liveFaults;
+        this.liveChaos = liveChaos;
+        this.alerts = alerts;
+        this.llm = llm;
+        this.budget = budget;
+        this.trustForwardedFor = trustForwardedFor;
+    }
+
+    /** What the UI needs to label itself honestly: which estate, which investigator, which model. */
+    @GetMapping("/mode")
+    public Map<String, Object> mode() {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("estate", telemetry.kind());
+        out.put("investigator", incidents.effectiveMode());
+        out.put("llmConfigured", llm.available());
+        out.put("model", llm.available() ? llm.model() : null);
+        out.put("budget", budget.status());
+        return out;
+    }
+
+    /** Live estate: alerts currently firing from the metrics monitor. */
+    @GetMapping("/alerts")
+    public List<AlertMonitor.Alert> alerts() {
+        return alerts.activeAlerts();
+    }
+
+    /** Live estate: per-service health. */
+    @GetMapping("/estate/health")
+    public Map<String, Object> estateHealth() {
+        if (!telemetry.isLive()) {
+            return Map.of("estate", "simulated");
+        }
+        return estate.healthOfAll();
     }
 
     @GetMapping("/topology")
@@ -51,34 +107,70 @@ public class ApiControllers {
     }
 
     @PostMapping("/incidents")
-    public Map<String, Object> startIncident(@RequestBody StartIncidentRequest req) {
+    public ResponseEntity<Map<String, Object>> startIncident(@RequestBody StartIncidentRequest req,
+                                                             HttpServletRequest http) {
         if (req.alertText() == null || req.alertText().isBlank()) {
-            throw new ResponseStatusExceptionAdapter(HttpStatus.BAD_REQUEST, "alertText is required");
+            return ResponseEntity.badRequest().body(Map.of("error", "alertText is required"));
         }
-        Incident incident = incidents.start(req.alertText());
-        return Map.of("incidentId", incident.getId(), "mode", incident.getMode(),
-                "scenarioId", incident.getScenarioId());
+        if (req.alertText().length() > 4000) {
+            return ResponseEntity.badRequest().body(Map.of("error", "alertText is limited to 4000 characters"));
+        }
+        try {
+            Incident incident = incidents.start(req.alertText(), clientKey(http));
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("incidentId", incident.getId());
+            body.put("mode", incident.getMode());
+            body.put("scenarioId", incident.getScenarioId());
+            body.put("estate", telemetry.kind());
+            body.put("model", incident.getMode().equals("llm") ? llm.model() : null);
+            return ResponseEntity.ok(body);
+        } catch (LlmBudget.BudgetExceededException e) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(Map.of("error", e.getMessage()));
+        } catch (IncidentService.CannotStartException e) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    private String clientKey(HttpServletRequest http) {
+        if (trustForwardedFor) {
+            String fwd = http.getHeader("X-Forwarded-For");
+            if (fwd != null && !fwd.isBlank()) {
+                return fwd.split(",")[0].trim();
+            }
+        }
+        return http.getRemoteAddr();
     }
 
     @GetMapping("/incidents/{id}")
     public ResponseEntity<?> incident(@PathVariable String id) {
         return incidents.byId(id)
-                .<ResponseEntity<?>>map(i -> ResponseEntity.ok(Map.of(
-                        "incidentId", i.getId(),
-                        "status", i.getStatus().name(),
-                        "mode", i.getMode(),
-                        "startedAt", i.getStartedAt().toString(),
-                        "toolCalls", i.getToolCallCount())))
+                .<ResponseEntity<?>>map(i -> {
+                    Map<String, Object> body = new LinkedHashMap<>();
+                    body.put("incidentId", i.getId());
+                    body.put("status", i.getStatus().name());
+                    body.put("mode", i.getMode());
+                    body.put("startedAt", i.getStartedAt().toString());
+                    body.put("toolCalls", i.getToolCallCount());
+                    body.put("usage", i.getUsage());
+                    body.put("error", i.getError());
+                    return ResponseEntity.ok(body);
+                })
                 .orElse(ResponseEntity.notFound().build());
     }
 
     @GetMapping("/incidents/{id}/report")
     public ResponseEntity<?> report(@PathVariable String id) {
         return incidents.byId(id)
-                .<ResponseEntity<?>>map(i -> i.getReport() == null
-                        ? ResponseEntity.status(HttpStatus.ACCEPTED)
-                        .body(Map.of("status", i.getStatus().name()))
-                        : ResponseEntity.ok(i.getReport()))
+                .<ResponseEntity<?>>map(i -> {
+                    if (i.getReport() != null) {
+                        return ResponseEntity.ok(i.getReport());
+                    }
+                    Map<String, Object> body = new LinkedHashMap<>();
+                    body.put("status", i.getStatus().name());
+                    body.put("error", i.getError());
+                    return ResponseEntity.status(i.getStatus() == Incident.Status.FAILED
+                            ? HttpStatus.UNPROCESSABLE_ENTITY : HttpStatus.ACCEPTED).body(body);
+                })
                 .orElse(ResponseEntity.notFound().build());
     }
 
@@ -110,17 +202,50 @@ public class ApiControllers {
 
     @GetMapping("/chaos")
     public Map<String, Object> chaosState() {
+        if (telemetry.isLive()) {
+            // Live faults are injected into real services; alerts come from the monitor, so there are no
+            // preset alert texts to paste.
+            List<Map<String, String>> list = liveFaults.all().stream()
+                    .map(f -> Map.of("id", f.id(), "name", f.name(), "description", f.description(),
+                            "category", f.category(), "alertText", ""))
+                    .toList();
+            List<String> active;
+            try {
+                active = liveChaos.activeFaults();
+            } catch (RuntimeException e) {
+                active = List.of();
+            }
+            return Map.of("estate", "live", "scenarios", list, "active", String.join(",", active),
+                    "activeFaults", active);
+        }
         List<Map<String, String>> list = scenarios.all().stream()
                 .map(s -> Map.of("id", s.id(), "name", s.name(),
                         "description", s.description() == null ? "" : s.description(),
                         "alertText", s.alertText()))
                 .toList();
-        return Map.of("scenarios", list,
-                "active", sim.activeScenario().map(ScenarioDef::id).orElse(""));
+        String active = sim.activeScenario().map(ScenarioDef::id).orElse("");
+        return Map.of("estate", "simulated", "scenarios", list, "active", active,
+                "activeFaults", active.isEmpty() ? List.of() : List.of(active));
     }
 
     @PostMapping("/chaos/{scenarioId}")
-    public Map<String, String> activate(@PathVariable String scenarioId) {
+    public Map<String, Object> activate(@PathVariable String scenarioId) {
+        if (telemetry.isLive()) {
+            if (scenarioId.equals("none")) {
+                Map<String, String> errors = liveChaos.resetAll();
+                return Map.of("active", "", "errors", errors);
+            }
+            LiveFaultCatalog.Fault fault = liveFaults.byId(scenarioId)
+                    .orElseThrow(() -> new ResponseStatusExceptionAdapter(HttpStatus.NOT_FOUND,
+                            "Unknown fault " + scenarioId));
+            try {
+                liveChaos.inject(fault);
+            } catch (RuntimeException e) {
+                throw new ResponseStatusExceptionAdapter(HttpStatus.BAD_GATEWAY,
+                        "Could not inject " + scenarioId + ": " + e.getMessage());
+            }
+            return Map.of("active", fault.id());
+        }
         if (scenarioId.equals("none")) {
             sim.deactivate();
             return Map.of("active", "");
@@ -130,6 +255,15 @@ public class ApiControllers {
                         "Unknown scenario " + scenarioId));
         sim.activate(def);
         return Map.of("active", def.id());
+    }
+
+    /** Live estate: wipe logs, metrics and change history on every service (used by the eval harness). */
+    @PostMapping("/chaos/admin/clear-history")
+    public Map<String, Object> clearHistory() {
+        if (!telemetry.isLive()) {
+            throw new ResponseStatusExceptionAdapter(HttpStatus.BAD_REQUEST, "Only available for the live estate");
+        }
+        return Map.of("errors", liveChaos.clearHistoryAll());
     }
 
     static class ResponseStatusExceptionAdapter extends org.springframework.web.server.ResponseStatusException {

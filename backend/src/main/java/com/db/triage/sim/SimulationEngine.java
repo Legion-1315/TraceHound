@@ -5,6 +5,7 @@ import com.db.triage.model.Telemetry.ChangeEvent;
 import com.db.triage.model.Telemetry.LogLine;
 import com.db.triage.model.Telemetry.MetricPoint;
 import com.db.triage.model.Telemetry.MetricsSummary;
+import com.db.triage.telemetry.TelemetrySource;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -22,7 +23,12 @@ import java.util.concurrent.atomic.AtomicReference;
  * scenario overlays that scenario's log/metric/change-event signature from its start time.
  */
 @Service
-public class SimulationEngine {
+public class SimulationEngine implements TelemetrySource {
+
+    @Override
+    public String kind() {
+        return "simulated";
+    }
 
     private static final String[] ISINS = {"DE000BAY0017", "FR0000120271", "NL0011821202", "GB00BH4HKS39",
             "DE0007164600", "IT0003128367", "ES0113900J37"};
@@ -80,6 +86,7 @@ public class SimulationEngine {
     }
 
     /** Recent log lines for a service, newest first. Fault injections overlay the healthy stream. */
+    @Override
     public List<LogLine> queryLogs(String serviceId, int minutes) {
         Instant now = Instant.now();
         Instant windowStart = now.minus(Duration.ofMinutes(minutes));
@@ -120,6 +127,7 @@ public class SimulationEngine {
     }
 
     /** Current metrics summary with 60-minute series. */
+    @Override
     public MetricsSummary queryMetrics(String serviceId) {
         Instant now = Instant.now();
         double baseline = BASELINE_THROUGHPUT.getOrDefault(serviceId, 300.0);
@@ -164,6 +172,7 @@ public class SimulationEngine {
     }
 
     /** Change events across the given services in the window; scenario-planted events included. */
+    @Override
     public List<ChangeEvent> changeEvents(List<String> serviceIds, int minutes) {
         Instant now = Instant.now();
         List<ChangeEvent> events = new ArrayList<>();
@@ -181,6 +190,7 @@ public class SimulationEngine {
     }
 
     /** Pre/post-deploy schema diff for a service, if the active scenario planted one. */
+    @Override
     public Optional<ScenarioDef.SchemaDiff> schemaDiff(String serviceId) {
         return activeScenario()
                 .map(ScenarioDef::schemaDiff)

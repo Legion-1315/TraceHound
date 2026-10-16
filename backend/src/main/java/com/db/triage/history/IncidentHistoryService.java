@@ -171,15 +171,17 @@ public class IncidentHistoryService {
 
     /** Append a completed real investigation and persist. Severity is read from the alert text. */
     public synchronized void record(String incidentId, String scenarioId, TriageReport report, String alertText) {
-        ScenarioDef def = scenarios.byId(scenarioId).orElse(null);
+        ScenarioDef def = scenarioId == null || scenarioId.isBlank() ? null : scenarios.byId(scenarioId).orElse(null);
         boolean critical = alertText != null && alertText.toUpperCase(Locale.ROOT).contains("SEV1");
-        String rootService = def != null ? rootService(def) : "regulatory-gateway";
+        // Live investigations have no scenario: trust what the agent concluded.
+        String rootService = report.rootCauseService() != null ? report.rootCauseService()
+                : def != null ? rootService(def) : "unknown";
 
         IncidentHistory history = new IncidentHistory(
                 incidentId,
                 Instant.now(),
-                scenarioId,
-                def != null ? categoryOf(def) : "Other",
+                scenarioId == null || scenarioId.isBlank() ? "live" : scenarioId,
+                def != null ? categoryOf(def) : "Live investigation",
                 rootService,
                 SERVICE_DISPLAY.getOrDefault(rootService, rootService),
                 critical ? "SEV1" : "SEV2",

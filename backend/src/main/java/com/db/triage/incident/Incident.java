@@ -1,5 +1,6 @@
 package com.db.triage.incident;
 
+import com.db.triage.model.AgentUsage;
 import com.db.triage.model.TriageReport;
 
 import java.time.Instant;
@@ -18,6 +19,8 @@ public class Incident {
     private final AtomicReference<Status> status = new AtomicReference<>(Status.RUNNING);
     private final AtomicReference<TriageReport> report = new AtomicReference<>();
     private final AtomicInteger toolCalls = new AtomicInteger();
+    private final AtomicReference<AgentUsage> usage = new AtomicReference<>();
+    private final AtomicReference<String> error = new AtomicReference<>();
 
     public Incident(String id, String alertText, String scenarioId, String mode) {
         this.id = id;
@@ -68,5 +71,23 @@ public class Incident {
 
     public int getToolCallCount() {
         return toolCalls.get();
+    }
+
+    public AgentUsage getUsage() {
+        return usage.get();
+    }
+
+    public void setUsage(AgentUsage u) {
+        usage.set(u);
+    }
+
+    /** Why the investigation failed (FAILED status only). */
+    public String getError() {
+        return error.get();
+    }
+
+    public void fail(String message) {
+        error.set(message);
+        status.set(Status.FAILED);
     }
 }

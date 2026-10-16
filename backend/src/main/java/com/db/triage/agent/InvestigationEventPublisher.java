@@ -1,5 +1,6 @@
 package com.db.triage.agent;
 
+import com.db.triage.model.AgentUsage;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
@@ -49,6 +50,15 @@ public class InvestigationEventPublisher {
 
     public void hypotheses(String incidentId, List<Map<String, Object>> hypotheses) {
         publish(incidentId, "HYPOTHESIS_UPDATE", Map.of("hypotheses", hypotheses));
+    }
+
+    public void usage(String incidentId, AgentUsage usage) {
+        publish(incidentId, "USAGE", Map.of("usage", usage));
+    }
+
+    /** The investigation failed; the UI shows the reason instead of a report. */
+    public void error(String incidentId, String message) {
+        publish(incidentId, "ERROR", Map.of("text", message == null ? "Investigation failed" : message));
     }
 
     public void reportReady(String incidentId) {

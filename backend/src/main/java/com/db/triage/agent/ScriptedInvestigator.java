@@ -164,7 +164,11 @@ public class ScriptedInvestigator {
                 Duration.between(start, Instant.now()).toMillis(),
                 incident.getToolCallCount(),
                 redaction.count(incident.getId()),
-                false);
+                false,
+                TriageReport.ROOT_CAUSE_FOUND,
+                r.rootCauseService(),
+                "scripted",
+                null);
     }
 
     private void rememberIncident(ScenarioDef scenario, TriageReport report) {
