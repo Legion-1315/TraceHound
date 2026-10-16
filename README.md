@@ -16,6 +16,27 @@ no real infrastructure: it runs on any laptop with Java and Node.
   pacing and never touches the network. Optional: set `ANTHROPIC_API_KEY` + `TRIAGE_MODE=llm` for
   the live LLM agent.
 
+## Live mode: real services + real Claude agent
+
+The `estate/` folder holds six real Spring Boot services (plus a mock regulator) that pass
+trades to each other over HTTP and keep real logs and metrics. The triage app investigates them
+with a live Claude agent; any free-text alert works, and the agent reports *out of scope* or
+*no fault found* when that is the honest answer. There is no scripted fallback in this mode.
+
+```bash
+cp .env.example .env          # then put your ANTHROPIC_API_KEY in .env (git-ignored)
+docker compose up --build     # first build takes a few minutes
+```
+
+Open **http://localhost:8080**, open the chaos panel (Ctrl+Shift+K), inject a real fault
+(e.g. rename a field in ref-data, expire the gateway's TLS cert), wait for the alert or type
+your own, and watch the agent investigate the running services.
+
+**Your API key never goes into git.** It lives only in `.env` (ignored by `.gitignore`) or in
+your host's environment variables. Spending guard-rails, all overridable in `.env`: at most 5
+investigations per visitor per hour, 40 per day, US$5 of estimated spend per day, and 2 at once.
+Also set a monthly spend limit in the Claude Console as a backstop.
+
 ## Start (one process, one port)
 
 The React app is compiled and folded into the Spring Boot jar, so a single command serves the UI,
@@ -38,6 +59,38 @@ cd backend && ./gradlew bootJar && java -jar build/libs/backend-0.0.1-SNAPSHOT.j
 
 That one jar is the whole demo — copy it to any machine with a JRE and run it. `docker compose up
 --build` produces the equivalent single container.
+
+## Deploy the live demo to an Oracle Cloud Always Free VM
+
+Seven services plus the triage app need about 3 GB of RAM, more than PaaS free tiers give.
+An Always Free Ampere (ARM) VM has up to 24 GB.
+
+1. **Create the VM** (cloud.oracle.com → Compute → Instances → Create): image *Ubuntu 24.04*,
+   shape *VM.Standard.A1.Flex* with 2 OCPU / 12 GB. Add your SSH public key. Note the public IP.
+   If you get "out of host capacity", retry later or pick another availability domain.
+2. **Open ports 80 and 443:** in the instance's subnet → Security List → add ingress rules for
+   TCP 80 and 443 from `0.0.0.0/0`. Ubuntu's own firewall also blocks them; step 3 opens it.
+3. **Install Docker and open the OS firewall** (on the VM, over SSH):
+   ```bash
+   sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2 git
+   sudo usermod -aG docker $USER && newgrp docker
+   sudo iptables -I INPUT 6 -p tcp --dport 80 -j ACCEPT
+   sudo iptables -I INPUT 6 -p tcp --dport 443 -j ACCEPT
+   sudo netfilter-persistent save
+   ```
+4. **Get the code and your key onto the VM:**
+   ```bash
+   git clone https://github.com/Legion-1315/TraceHound.git && cd TraceHound
+   cp .env.example .env && nano .env      # paste ANTHROPIC_API_KEY; the file stays on the VM
+   chmod 600 .env
+   ```
+5. **Start it with HTTPS.** sslip.io turns your IP into a hostname, and Caddy gets a free
+   certificate for it automatically. For IP `140.238.1.2`:
+   ```bash
+   DOMAIN=140-238-1-2.sslip.io docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+   ```
+   Then open `https://140-238-1-2.sslip.io`. Containers restart on their own after a reboot.
+6. **Update later:** `git pull` and run the same command again.
 
 ## Deploy to Google Cloud Run
 
@@ -217,7 +270,10 @@ entry**. Further tests cover the seeded analytics corpus and its aggregation.
 
 ## Honest limitations (know these before the judges ask)
 
-- **The estate is simulated.** Telemetry, change events and schema diffs are generated in-process
+- **Simulated mode is simulated; live mode is a small demo estate.** In live mode the services are real
+  processes and faults are real (renamed fields, an expired certificate, a stalled consumer), but they are
+  injected on purpose into six demo services, not found in a production bank estate.
+- **(Simulated mode)** The estate is simulated. Telemetry, change events and schema diffs are generated in-process
   from the scenario files. Integrating a real estate means implementing the six agent tools against
   real systems (logs → Splunk/ELK, changes → CMDB, topology → service catalog); the agent loop
   itself is unchanged.

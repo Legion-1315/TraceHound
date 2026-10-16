@@ -93,3 +93,15 @@ jobs:
           script: |
             const report = require('./.github/scripts/failure-report.js');
             await report({ github, context, job: 'smoke' });
+
+  docker:
+    name: Docker images build (compose)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build every image the live demo uses
+        run: |
+          cp .env.example .env
+          docker compose build
+          DOMAIN=ci.sslip.io docker compose -f docker-compose.yml -f docker-compose.prod.yml config -q

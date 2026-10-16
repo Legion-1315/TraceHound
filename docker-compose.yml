@@ -1,14 +1,76 @@
-# One container, one port — the UI is bundled into the Spring Boot jar.
+# The whole live demo: six real estate services + the mock regulator + the triage app.
+#
+#   1. cp .env.example .env   and put your ANTHROPIC_API_KEY in .env (git-ignored)
+#   2. docker compose up --build
+#   3. open http://localhost:8080
+#
+# Only the triage app is published. The estate services (and their /chaos endpoints)
+# are reachable only inside the compose network.
+
+x-estate: &estate
+  build: ./estate
+  image: tracehound-estate
+  restart: unless-stopped
+  mem_limit: 320m
+  environment: &estate-env
+    TRADE_CAPTURE_URL: http://trade-capture:8101
+    REF_DATA_SERVICE_URL: http://ref-data-service:8102
+    ENRICHMENT_SERVICE_URL: http://enrichment-service:8103
+    SUBMISSION_BUILDER_URL: http://submission-builder:8104
+    REGULATORY_GATEWAY_URL: http://regulatory-gateway:8105
+    TRADE_CONFIRMATIONS_URL: http://trade-confirmations:8106
+    REGULATOR_ARM_URL: https://regulator-arm:8443
+
 services:
+  trade-capture:
+    <<: *estate
+    environment: { <<: *estate-env, SPRING_PROFILES_ACTIVE: trade-capture }
+  ref-data-service:
+    <<: *estate
+    environment: { <<: *estate-env, SPRING_PROFILES_ACTIVE: ref-data-service }
+  enrichment-service:
+    <<: *estate
+    environment: { <<: *estate-env, SPRING_PROFILES_ACTIVE: enrichment-service }
+  submission-builder:
+    <<: *estate
+    environment: { <<: *estate-env, SPRING_PROFILES_ACTIVE: submission-builder }
+  regulatory-gateway:
+    <<: *estate
+    environment: { <<: *estate-env, SPRING_PROFILES_ACTIVE: regulatory-gateway }
+  trade-confirmations:
+    <<: *estate
+    environment: { <<: *estate-env, SPRING_PROFILES_ACTIVE: trade-confirmations }
+  regulator-arm:
+    <<: *estate
+    environment: { <<: *estate-env, SPRING_PROFILES_ACTIVE: regulator-arm }
+
   triage:
     build: .
+    restart: unless-stopped
+    mem_limit: 768m
     ports:
-      - "8080:8080"
+      - "${TRIAGE_BIND:-127.0.0.1}:8080:8080"
+    env_file:
+      - path: .env
+        required: false
     environment:
-      - TRIAGE_MODE=${TRIAGE_MODE:-scripted}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      TRIAGE_ESTATE: ${TRIAGE_ESTATE:-live}
+      TRADE_CAPTURE_URL: http://trade-capture:8101
+      REF_DATA_SERVICE_URL: http://ref-data-service:8102
+      ENRICHMENT_SERVICE_URL: http://enrichment-service:8103
+      SUBMISSION_BUILDER_URL: http://submission-builder:8104
+      REGULATORY_GATEWAY_URL: http://regulatory-gateway:8105
+      TRADE_CONFIRMATIONS_URL: http://trade-confirmations:8106
     volumes:
       - triage-data:/app/data
+    depends_on:
+      - trade-capture
+      - ref-data-service
+      - enrichment-service
+      - submission-builder
+      - regulatory-gateway
+      - trade-confirmations
+      - regulator-arm
 
 volumes:
   triage-data:

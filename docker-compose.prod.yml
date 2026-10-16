@@ -1,0 +1,25 @@
+# Public deployment on a VM: adds Caddy in front for automatic HTTPS.
+#   DOMAIN=<your-ip-with-dashes>.sslip.io docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+services:
+  triage:
+    environment:
+      # Caddy is the only client, so the X-Forwarded-For it sets is trustworthy;
+      # the per-visitor rate limit needs it to tell visitors apart.
+      TRIAGE_TRUST_FORWARDED_FOR: "true"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN, e.g. 140-238-1-2.sslip.io}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on:
+      - triage
+
+volumes:
+  caddy-data:

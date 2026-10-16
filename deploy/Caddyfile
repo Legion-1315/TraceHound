@@ -1,0 +1,5 @@
+{$DOMAIN} {
+	encode gzip
+	# WebSocket upgrades are proxied automatically.
+	reverse_proxy triage:8080
+}
