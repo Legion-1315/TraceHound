@@ -1,5 +1,5 @@
 import type {
-  DashboardData, InvestigationEvent, LedgerEntry, ScenarioInfo, Topology, TriageReport,
+  ChaosState, DashboardData, InvestigationEvent, LedgerEntry, LiveAlert, ModeInfo, Topology, TriageReport,
 } from './types'
 
 async function get<T>(url: string): Promise<T> {
@@ -8,20 +8,38 @@ async function get<T>(url: string): Promise<T> {
   return res.json()
 }
 
+/** POST and surface the server's {error} message when there is one. */
+async function post<T>(url: string, body?: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  if (!res.ok) {
+    let message = `${url} -> ${res.status}`
+    try {
+      const data = await res.json() as { error?: string; message?: string }
+      message = data.error ?? data.message ?? message
+    } catch { /* not JSON */ }
+    throw new Error(message)
+  }
+  return res.json() as Promise<T>
+}
+
 export const api = {
   topology: () => get<Topology>('/api/topology'),
+  mode: () => get<ModeInfo>('/api/mode'),
+  alerts: () => get<LiveAlert[]>('/api/alerts'),
 
-  chaosState: () => get<{ scenarios: ScenarioInfo[]; active: string }>('/api/chaos'),
+  chaosState: () => get<ChaosState>('/api/chaos'),
+  injectFault: (id: string) => post<{ active: string }>(`/api/chaos/${id}`),
+  resetFaults: () => post<{ active: string }>('/api/chaos/none'),
 
-  startIncident: async (alertText: string) => {
-    const res = await fetch('/api/incidents', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ alertText }),
-    })
-    if (!res.ok) throw new Error(`start incident failed: ${res.status}`)
-    return res.json() as Promise<{ incidentId: string; mode: string; scenarioId: string }>
-  },
+  startIncident: (alertText: string) =>
+    post<{ incidentId: string; mode: string; scenarioId: string; estate: string; model: string | null }>(
+      '/api/incidents', { alertText }),
+
+  incident: (id: string) => get<{ status: string; error: string | null }>(`/api/incidents/${id}`),
 
   analytics: () => get<DashboardData>('/api/analytics'),
 

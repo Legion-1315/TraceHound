@@ -29,8 +29,18 @@ export interface Hypothesis {
   probability: number
 }
 
+export interface AgentUsage {
+  model: string
+  apiCalls: number
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  estimatedCostUsd: number
+}
+
 export interface InvestigationEvent {
-  type: 'NODE_STATUS' | 'AGENT_THOUGHT' | 'TOOL_CALL' | 'HYPOTHESIS_UPDATE' | 'REPORT_READY'
+  type: 'NODE_STATUS' | 'AGENT_THOUGHT' | 'TOOL_CALL' | 'HYPOTHESIS_UPDATE' | 'REPORT_READY' | 'USAGE' | 'ERROR'
   at: string
   service?: string
   status?: NodeStatus
@@ -40,6 +50,7 @@ export interface InvestigationEvent {
   summary?: string
   ledgerId?: number
   hypotheses?: Hypothesis[]
+  usage?: AgentUsage
 }
 
 export interface LedgerEntry {
@@ -79,6 +90,34 @@ export interface TriageReport {
   toolCallCount: number
   piiRedactedCount: number
   inconclusive: boolean
+  outcome: 'ROOT_CAUSE_FOUND' | 'INCONCLUSIVE' | 'NO_FAULT_FOUND' | 'OUT_OF_SCOPE'
+  rootCauseService: string | null
+  mode: 'llm' | 'scripted'
+  usage: AgentUsage | null
+}
+
+export interface ModeInfo {
+  estate: 'simulated' | 'live'
+  investigator: 'llm' | 'scripted'
+  llmConfigured: boolean
+  model: string | null
+  budget: {
+    investigationsToday: number
+    maxInvestigationsPerDay: number
+    estimatedCostTodayUsd: number
+    maxDailyCostUsd: number
+    maxPerClientPerHour: number
+  }
+}
+
+export interface LiveAlert {
+  id: string
+  serviceId: string
+  ruleId: string
+  severity: string
+  text: string
+  firstSeen: string
+  lastSeen: string
 }
 
 export interface ScenarioInfo {
@@ -86,6 +125,14 @@ export interface ScenarioInfo {
   name: string
   description: string
   alertText: string
+  category?: string
+}
+
+export interface ChaosState {
+  estate: 'simulated' | 'live'
+  scenarios: ScenarioInfo[]
+  active: string
+  activeFaults: string[]
 }
 
 export interface ChartEntry {

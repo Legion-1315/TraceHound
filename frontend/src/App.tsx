@@ -7,6 +7,7 @@ import RightPanel from './components/RightPanel'
 import TicketModal from './components/TicketModal'
 import PanelDivider from './components/PanelDivider'
 import Footer from './components/Footer'
+import ChaosPanel from './components/ChaosPanel'
 import Tutorial from './tutorial/Tutorial'
 
 const TOUR_SEEN_KEY = 'triage-copilot.tour-seen'
@@ -54,7 +55,9 @@ export default function App() {
   const {
     setTopology, setScenarios, ticketOpen,
     tourActive, startTour, endTour,
+    modeInfo, setModeInfo, setAlerts, chaosOpen, setChaosOpen,
   } = useTriageStore()
+  const live = modeInfo?.estate === 'live'
   const [promptFirstRun, setPromptFirstRun] = useState(false)
   const [panels, setPanels] = useState<PanelWidths>(loadPanels)
 
@@ -79,23 +82,47 @@ export default function App() {
   useEffect(() => {
     api.topology().then(setTopology).catch(console.error)
     api.chaosState().then((s) => setScenarios(s.scenarios, '')).catch(console.error)
-    // Offer the tour on the user's first visit only.
-    try {
-      if (!localStorage.getItem(TOUR_SEEN_KEY)) {
-        setPromptFirstRun(true)
+    api.mode().then((m) => {
+      setModeInfo(m)
+      // The guided tour replays a preset scenario, which only exists in the simulated estate.
+      if (m.estate !== 'live') {
+        try {
+          if (!localStorage.getItem(TOUR_SEEN_KEY)) {
+            setPromptFirstRun(true)
+          }
+        } catch { /* localStorage unavailable — silently skip the prompt */ }
       }
-    } catch { /* localStorage unavailable — silently skip the prompt */ }
-  }, [setTopology, setScenarios])
+    }).catch(console.error)
+  }, [setTopology, setScenarios, setModeInfo])
+
+  // Live estate: keep firing alerts and the budget counters fresh.
+  useEffect(() => {
+    if (!live) return
+    const refresh = () => {
+      api.alerts().then(setAlerts).catch(() => {})
+      api.mode().then(setModeInfo).catch(() => {})
+    }
+    refresh()
+    const t = setInterval(refresh, 5000)
+    return () => clearInterval(t)
+  }, [live, setAlerts, setModeInfo])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && useTriageStore.getState().tourActive) {
         endTour()
       }
+      if (e.key === 'Escape' && useTriageStore.getState().chaosOpen) {
+        setChaosOpen(false)
+      }
+      if (e.ctrlKey && e.shiftKey && (e.key === 'K' || e.key === 'k')) {
+        e.preventDefault()
+        setChaosOpen(!useTriageStore.getState().chaosOpen)
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [endTour])
+  }, [endTour, setChaosOpen])
 
   function launchTour() {
     try { localStorage.setItem(TOUR_SEEN_KEY, '1') } catch { /* noop */ }
@@ -113,18 +140,43 @@ export default function App() {
       <header className="flex items-center justify-between border-b border-slate-800 px-4 py-2">
         <div className="flex items-baseline gap-3">
           <h1 className="text-lg font-semibold tracking-tight text-slate-100">
-            Code-<span className="text-sky-400">Catalyst</span>
+            Trace<span className="text-sky-400">Hound</span>
           </h1>
           <span className="text-xs text-slate-500">AI-powered incident triage · distributed estate</span>
         </div>
         <div className="flex items-center gap-3">
+          {modeInfo && (
+            <span
+              className={`rounded border px-2 py-0.5 text-[11px] ${live
+                ? 'border-violet-700 bg-violet-950/40 text-violet-300'
+                : 'border-slate-700 bg-slate-900 text-slate-400'}`}
+              title={live
+                ? 'Real services, real faults, real Claude agent'
+                : 'In-process simulated telemetry'}
+            >
+              {live ? 'Live estate' : 'Simulated estate'} ·{' '}
+              {modeInfo.investigator === 'llm'
+                ? `Claude agent${modeInfo.model ? ` (${modeInfo.model})` : ''}`
+                : 'scripted replay'}
+              {live && !modeInfo.llmConfigured && <span className="ml-1 text-rose-400">— no API key</span>}
+            </span>
+          )}
           <button
-            onClick={launchTour}
-            disabled={tourActive}
-            className="rounded border border-sky-700 bg-sky-950/40 px-2.5 py-1 text-[11px] font-semibold text-sky-300 hover:border-sky-500 hover:bg-sky-900/50 disabled:opacity-40"
+            onClick={() => setChaosOpen(true)}
+            className="rounded border border-amber-800 bg-amber-950/30 px-2.5 py-1 text-[11px] font-semibold text-amber-300 hover:border-amber-600"
+            title="Ctrl+Shift+K"
           >
-            {tourActive ? 'Tour running…' : '★ Take the tour'}
+            Inject fault
           </button>
+          {!live && (
+            <button
+              onClick={launchTour}
+              disabled={tourActive}
+              className="rounded border border-sky-700 bg-sky-950/40 px-2.5 py-1 text-[11px] font-semibold text-sky-300 hover:border-sky-500 hover:bg-sky-900/50 disabled:opacity-40"
+            >
+              {tourActive ? 'Tour running…' : '★ Take the tour'}
+            </button>
+          )}
         </div>
       </header>
 
@@ -162,6 +214,7 @@ export default function App() {
 
       <Footer />
       {ticketOpen && <TicketModal />}
+      {chaosOpen && <ChaosPanel />}
       {tourActive && <Tutorial />}
 
       {promptFirstRun && !tourActive && (

@@ -1,6 +1,13 @@
 import { useState } from 'react'
 import { useTriageStore } from '../store'
 
+const OUTCOME: Record<string, { label: string; box: string; title: string }> = {
+  ROOT_CAUSE_FOUND: { label: 'Root cause', box: 'border-rose-900/70 bg-rose-950/30', title: 'text-rose-300' },
+  INCONCLUSIVE: { label: 'Inconclusive', box: 'border-amber-900/70 bg-amber-950/20', title: 'text-amber-300' },
+  NO_FAULT_FOUND: { label: 'No fault found', box: 'border-emerald-900/70 bg-emerald-950/20', title: 'text-emerald-300' },
+  OUT_OF_SCOPE: { label: 'Out of scope', box: 'border-slate-700 bg-slate-900/60', title: 'text-slate-300' },
+}
+
 export default function ReportTab() {
   const { report, ledger, running, setTicketOpen } = useTriageStore()
   const [expanded, setExpanded] = useState<number | null>(null)
@@ -15,22 +22,25 @@ export default function ReportTab() {
   }
 
   const entryById = new Map(ledger.map((e) => [e.id, e]))
+  const outcome = report.outcome ?? (report.inconclusive ? 'INCONCLUSIVE' : 'ROOT_CAUSE_FOUND')
 
   return (
     <div className="space-y-4 p-3 text-xs">
-      <section data-tour="root-cause" className="rounded-md border border-rose-900/70 bg-rose-950/30 p-3">
+      <section data-tour="root-cause" className={`rounded-md border p-3 ${OUTCOME[outcome].box}`}>
         <div className="mb-1 flex items-center justify-between">
-          <span className="font-bold uppercase tracking-wider text-rose-300">Root cause</span>
+          <span className={`font-bold uppercase tracking-wider ${OUTCOME[outcome].title}`}>{OUTCOME[outcome].label}</span>
           <span className="rounded bg-rose-900/60 px-2 py-0.5 font-mono text-[11px] font-bold text-rose-200">
             {report.confidencePct}% confidence
           </span>
         </div>
         <p className="leading-relaxed text-slate-200">{report.rootCause}</p>
         <p className="mt-2 text-[11px] leading-relaxed text-slate-400">{report.summary}</p>
-        <div className="mt-2 text-[11px] text-slate-400">
-          Owner: <span className="text-slate-200">{report.owningTeam}</span>
-          {report.owningSlack && <span className="ml-1 text-sky-400">{report.owningSlack}</span>}
-        </div>
+        {report.owningTeam && report.owningTeam !== 'unknown' && (
+          <div className="mt-2 text-[11px] text-slate-400">
+            Owner: <span className="text-slate-200">{report.owningTeam}</span>
+            {report.owningSlack && <span className="ml-1 text-sky-400">{report.owningSlack}</span>}
+          </div>
+        )}
       </section>
 
       <section data-tour="causal-chain">

@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { useTriageStore } from '../store'
 
 export default function Footer() {
-  const { running, startedAt, toolCallCount, report } = useTriageStore()
+  const { running, startedAt, toolCallCount, report, usage: liveUsage } = useTriageStore()
+  const usage = report?.usage ?? liveUsage
   const [now, setNow] = useState(Date.now())
 
   useEffect(() => {
@@ -25,6 +26,14 @@ export default function Footer() {
       <span>
         PII redacted <span className="font-mono text-emerald-400">{report ? report.piiRedactedCount : '—'}</span>
       </span>
+      {usage && (
+        <span title={`${usage.apiCalls} model calls · cache read ${usage.cacheReadTokens.toLocaleString()} tokens`}>
+          tokens <span className="font-mono text-slate-300">
+            {usage.inputTokens.toLocaleString()} in / {usage.outputTokens.toLocaleString()} out
+          </span>
+          {' '}· est. <span className="font-mono text-violet-300">${usage.estimatedCostUsd.toFixed(3)}</span>
+        </span>
+      )}
       {report && (
         <span className="ml-auto">
           diagnosis confidence <span className="font-mono text-sky-300">{report.confidencePct}%</span>

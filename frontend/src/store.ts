@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type {
-  FeedItem, Hypothesis, InvestigationEvent, LedgerEntry, NodeStatus, ScenarioInfo, Topology, TriageReport,
+  AgentUsage, FeedItem, Hypothesis, InvestigationEvent, LedgerEntry, LiveAlert, ModeInfo, NodeStatus, ScenarioInfo,
+  Topology, TriageReport,
 } from './types'
 import { api } from './api'
 import { subscribeToInvestigation } from './ws'
@@ -10,6 +11,12 @@ export type RightTab = 'Hypotheses' | 'Report' | 'Replay' | 'Analytics'
 interface TriageState {
   topology: Topology | null
   scenarios: ScenarioInfo[]
+  modeInfo: ModeInfo | null
+  alerts: LiveAlert[]
+  activeFaults: string[]
+  chaosOpen: boolean
+  usage: AgentUsage | null
+  error: string | null
   incidentId: string | null
   mode: string
   running: boolean
@@ -31,6 +38,11 @@ interface TriageState {
 
   setTopology: (t: Topology) => void
   setScenarios: (s: ScenarioInfo[], active: string) => void
+  setModeInfo: (m: ModeInfo) => void
+  setAlerts: (a: LiveAlert[]) => void
+  setActiveFaults: (f: string[]) => void
+  setChaosOpen: (open: boolean) => void
+  clearError: () => void
   beginIncident: (incidentId: string, mode: string) => void
   applyEvent: (e: InvestigationEvent) => void
   completeIncident: (report: TriageReport, ledger: LedgerEntry[], events: InvestigationEvent[]) => void
@@ -60,6 +72,8 @@ const emptyInvestigation = {
   ledger: [] as LedgerEntry[],
   replayEvents: [] as InvestigationEvent[],
   replayIndex: null as number | null,
+  usage: null as AgentUsage | null,
+  error: null as string | null,
 }
 
 // Held outside store state — a live WebSocket subscription must survive re-renders and cannot be serialised.
@@ -68,6 +82,10 @@ let currentUnsubscribe: (() => void) | null = null
 export const useTriageStore = create<TriageState>((set, get) => ({
   topology: null,
   scenarios: [],
+  modeInfo: null,
+  alerts: [],
+  activeFaults: [],
+  chaosOpen: false,
   ticketOpen: false,
   activeTab: 'Hypotheses',
   tourActive: false,
@@ -76,6 +94,11 @@ export const useTriageStore = create<TriageState>((set, get) => ({
 
   setTopology: (topology) => set({ topology }),
   setScenarios: (scenarios) => set({ scenarios }),
+  setModeInfo: (modeInfo) => set({ modeInfo }),
+  setAlerts: (alerts) => set({ alerts }),
+  setActiveFaults: (activeFaults) => set({ activeFaults }),
+  setChaosOpen: (chaosOpen) => set({ chaosOpen }),
+  clearError: () => set({ error: null }),
 
   beginIncident: (incidentId, mode) =>
     set({ ...emptyInvestigation, incidentId, mode, running: true, startedAt: Date.now() }),
@@ -94,6 +117,11 @@ export const useTriageStore = create<TriageState>((set, get) => ({
         next.toolCallCount = s.toolCallCount + 1
       } else if (e.type === 'HYPOTHESIS_UPDATE' && e.hypotheses) {
         next.hypotheses = e.hypotheses
+      } else if (e.type === 'USAGE' && e.usage) {
+        next.usage = e.usage
+      } else if (e.type === 'ERROR') {
+        next.error = e.text ?? 'Investigation failed'
+        next.running = false
       }
       return next
     }),
@@ -115,13 +143,27 @@ export const useTriageStore = create<TriageState>((set, get) => ({
 
   startInvestigation: async (alertText) => {
     if (get().running) return
-    const { incidentId, mode } = await api.startIncident(alertText)
+    set({ error: null })
+    let started: { incidentId: string; mode: string }
+    try {
+      started = await api.startIncident(alertText)
+    } catch (err) {
+      // rate limit, spend cap, missing API key… — shown in the panel, never silently swapped for a replay
+      set({ error: err instanceof Error ? err.message : String(err) })
+      return
+    }
+    const { incidentId, mode } = started
     get().beginIncident(incidentId, mode)
     currentUnsubscribe?.()
     currentUnsubscribe = subscribeToInvestigation(incidentId, (e) => {
       get().applyEvent(e)
       if (e.type === 'REPORT_READY') void pollReport(incidentId)
+      if (e.type === 'ERROR') {
+        currentUnsubscribe?.()
+        currentUnsubscribe = null
+      }
     })
+    void watchIncident(incidentId)
   },
 
   startTour: () => {
@@ -136,7 +178,7 @@ export const useTriageStore = create<TriageState>((set, get) => ({
 
 async function pollReport(incidentId: string) {
   const store = useTriageStore.getState()
-  for (let attempt = 0; attempt < 20; attempt++) {
+  for (let attempt = 0; attempt < 40; attempt++) {
     try {
       const report = await api.report(incidentId)
       if (report && 'rootCause' in report) {
@@ -148,6 +190,29 @@ async function pollReport(incidentId: string) {
       }
     } catch { /* not ready yet */ }
     await new Promise((r) => setTimeout(r, 400))
+  }
+}
+
+/**
+ * Safety net for events the WebSocket can miss (e.g. a failure before the subscription connected):
+ * poll the incident status while it is the current one and still running.
+ */
+async function watchIncident(incidentId: string) {
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 2000))
+    const s = useTriageStore.getState()
+    if (s.incidentId !== incidentId || !s.running) return
+    try {
+      const status = await api.incident(incidentId)
+      if (status.status === 'FAILED') {
+        useTriageStore.setState({ running: false, error: status.error ?? 'Investigation failed' })
+        return
+      }
+      if (status.status === 'COMPLETE' && !useTriageStore.getState().report) {
+        void pollReport(incidentId)
+        return
+      }
+    } catch { /* transient — try again */ }
   }
 }
 
