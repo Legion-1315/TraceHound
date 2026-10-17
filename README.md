@@ -37,6 +37,15 @@ your host's environment variables. Spending guard-rails, all overridable in `.en
 investigations per visitor per hour, 40 per day, US$5 of estimated spend per day, and 2 at once.
 Also set a monthly spend limit in the Claude Console as a backstop.
 
+`POST /api/chaos/admin/clear-history` (wipes logs, metrics and change history on every service,
+used by evaluation runs) exists only when `TRIAGE_ADMIN_TOKEN` is set, and then needs that token
+in an `X-Admin-Token` header. Leave it unset on a public demo.
+
+**What has been verified so far:** the six faults, their alerts and recovery, run against the
+real services without an LLM by `scripts/smoke-test.sh` (locally and in CI), and the compose
+images build in CI. An end-to-end run with the Claude agent has **not** been done yet; results
+will go in `docs/TASK_LOG.md`.
+
 ## Start (one process, one port)
 
 The React app is compiled and folded into the Spring Boot jar, so a single command serves the UI,
@@ -61,6 +70,10 @@ That one jar is the whole demo — copy it to any machine with a JRE and run it.
 --build` produces the equivalent single container.
 
 ## Deploy the live demo to an Oracle Cloud Always Free VM
+
+> **Not yet tried on a real VM.** The steps below have not been run end to end; the compose files
+> they use build in CI. The "about 3 GB of RAM" figure comes from the compose `mem_limit`s
+> (7 × 320 MB + 768 MB), not from a measurement.
 
 Seven services plus the triage app need about 3 GB of RAM, more than PaaS free tiers give.
 An Always Free Ampere (ARM) VM has up to 24 GB.
@@ -268,7 +281,29 @@ Acceptance tests activate each scenario, run the scripted investigator, and asse
 root cause matches `expected_root_cause` and **every report citation resolves to a real ledger
 entry**. Further tests cover the seeded analytics corpus and its aggregation.
 
+The estate services have their own tests (`cd estate && ./gradlew test`). The live smoke test
+starts all seven services and the triage app from the built jars (no API key), injects each of
+the six faults, checks the alert and log signature, and waits for recovery (about 11 minutes,
+because alerts use a rolling one-minute window):
+
+```bash
+(cd estate && ./gradlew bootJar) && (cd backend && ./gradlew bootJar)
+bash scripts/smoke-test.sh        # logs in .run/logs/<service>.log
+```
+
 ## Honest limitations (know these before the judges ask)
+
+- **Live mode: the Claude agent's accuracy is not measured yet.** The fault catalogue has
+  `expected_root_cause_service` and keywords per fault for grading, but no graded run has been
+  done. Until then, there is no accuracy, latency or cost figure for live mode.
+- **Live mode: anyone who can open the UI can inject or clear faults.** `POST /api/chaos/{id}` is
+  public by design (the chaos panel). On a shared deployment one visitor can change the estate
+  under another visitor's investigation.
+- **Live mode: alerts lag the fault.** The monitor polls every 10 s and the rules use a rolling
+  one-minute window, so symptoms show 10-50 s after a fault is injected and clear about a minute
+  after it is removed (measured by the smoke test).
+- **Cost figures are estimates.** They use list prices from `application.properties`, and cache
+  reads are counted at 0.1x input where Claude Sonnet 5.5 bills 0.05x, so they err high.
 
 - **Simulated mode is simulated; live mode is a small demo estate.** In live mode the services are real
   processes and faults are real (renamed fields, an expired certificate, a stalled consumer), but they are

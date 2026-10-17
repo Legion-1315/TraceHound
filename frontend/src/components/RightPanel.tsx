@@ -1,8 +1,11 @@
+import { lazy, Suspense } from 'react'
 import { useTriageStore, type RightTab } from '../store'
 import HypothesesTab from './HypothesesTab'
 import ReportTab from './ReportTab'
 import ReplayTab from './ReplayTab'
-import AnalyticsTab from './AnalyticsTab'
+
+// Recharts is only needed on the Analytics tab, so it loads when that tab is first opened.
+const AnalyticsTab = lazy(() => import('./AnalyticsTab'))
 
 const TABS: RightTab[] = ['Hypotheses', 'Report', 'Replay','Analytics']
 
@@ -32,7 +35,11 @@ export default function RightPanel() {
         {activeTab === 'Hypotheses' && <HypothesesTab />}
         {activeTab === 'Report' && <ReportTab />}
         {activeTab === 'Replay' && <ReplayTab />}
-        {activeTab === 'Analytics' && <AnalyticsTab />}
+        {activeTab === 'Analytics' && (
+          <Suspense fallback={<div className="p-4 text-sm text-slate-500">Loading analytics…</div>}>
+            <AnalyticsTab />
+          </Suspense>
+        )}
       </div>
     </div>
   )

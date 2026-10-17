@@ -111,3 +111,26 @@ for 25 s in a row (at least two monitor polls).
 Local rerun with both fixes (run 6): PASSED. Symptom times 13 / 32 / 13 / 13 / 13 / 42 s and
 recovery 87 / 36 / 87 / 87 / 87 / 98 s, in catalogue order. Recovery includes the 25 s quiet
 period. The clear-history check returned 404.
+
+## Task 6: polish
+
+- **Code-split.** `CanvasPanel` (React Flow) and `AnalyticsTab` (Recharts) are loaded with
+  `React.lazy` + `Suspense`. Before: one 843.6 kB chunk (Vite warning). After: `index` 260.1 kB,
+  `CanvasPanel` 174.9 kB (+15.9 kB CSS), `AnalyticsTab` 397.0 kB, `value` 11.6 kB; no warning.
+  The first load fetches about 435 kB of JS instead of 844 kB. Recharts now loads only when the
+  Analytics tab is first opened. Checked in a browser against the built jar (simulated mode): the
+  canvas renders 6 nodes, `AnalyticsTab-*.js` is fetched only after the tab is clicked, the tab
+  renders 3 charts, and there are no console errors.
+- **CI warnings.** Every action now uses the lowest major that runs on Node 24, which removes the
+  "Node.js 20 is deprecated" and "setup-java v4 is deprecated" annotations: checkout v5,
+  setup-java v5, setup-node v5, setup-gradle v5, upload-artifact v6, download-artifact v7,
+  github-script v8. (I read each version's `action.yml` to check `runs.using: node24`.) The only
+  breaking change listed for these (setup-node v5 auto-caching) does not matter here because the
+  workflow already sets `cache: npm`. Still open: GitHub's notice that `ubuntu-latest` moves to
+  Ubuntu 26 from 2026-10-19. I left `ubuntu-latest` unchanged; pin `ubuntu-24.04` if CI should
+  not change under you.
+- **README.** The live-mode section now says what has and has not been verified, and documents
+  `TRIAGE_ADMIN_TOKEN`. The Oracle section says it has not been run on a real VM yet (and that
+  the 3 GB figure comes from `mem_limit`s). Tests documents the estate tests and the smoke test.
+  "Honest limitations" adds: LLM accuracy not measured yet, the public chaos API, alert lag
+  (measured), and cost estimates that err high.

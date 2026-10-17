@@ -1,14 +1,16 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { useTriageStore } from './store'
 import { api } from './api'
 import ChatPanel from './components/ChatPanel'
-import CanvasPanel from './components/CanvasPanel'
 import RightPanel from './components/RightPanel'
 import TicketModal from './components/TicketModal'
 import PanelDivider from './components/PanelDivider'
 import Footer from './components/Footer'
 import ChaosPanel from './components/ChaosPanel'
 import Tutorial from './tutorial/Tutorial'
+
+// React Flow is the heaviest dependency; its own chunk lets the shell render while it loads.
+const CanvasPanel = lazy(() => import('./components/CanvasPanel'))
 
 const TOUR_SEEN_KEY = 'triage-copilot.tour-seen'
 const PANELS_KEY = 'code-catalyst.panel-widths'
@@ -195,7 +197,9 @@ export default function App() {
         />
 
         <section className="min-w-0 flex-1">
-          <CanvasPanel />
+          <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-slate-500">Loading canvas…</div>}>
+            <CanvasPanel />
+          </Suspense>
         </section>
 
         <PanelDivider
