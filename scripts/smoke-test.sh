@@ -236,3 +236,8 @@ for f in $FAULTS; do
   check_fault "$f"
 done
 
+
+echo "=== clear-history must not exist without TRIAGE_ADMIN_TOKEN"
+code="$(curl -s -o /dev/null -w '%{http_code}' -X POST "$TRIAGE/api/chaos/admin/clear-history")"
+[ "$code" = "404" ] || fail "POST /api/chaos/admin/clear-history with no token configured returned $code, expected 404"
+echo "  ok: 404"

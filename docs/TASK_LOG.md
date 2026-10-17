@@ -59,3 +59,31 @@ Problems found on the way:
   run for `bfa9a05` logged `13 tests completed, 8 failed` and `28 tests completed, 19 failed`
   and was green. The workflow now sets `defaults.run.shell: bash`, which runs steps with `-eo pipefail`.
 - I removed the `if [ ! -f scripts/smoke-test.sh ]` shortcut, so a missing script now fails the job.
+
+## Task 3: security fixes
+
+1. **`POST /api/chaos/admin/clear-history` needs a token.** New setting `triage.admin-token`
+   (env `TRIAGE_ADMIN_TOKEN`, empty in `.env.example`). With no token set the endpoint
+   returns 404. With a token set, the request must send it in `X-Admin-Token`, compared in
+   constant time; a missing or wrong token gets 401. Tests: `ClearHistoryAuthTest` (3 tests,
+   with the live-chaos service mocked so the authorised path really calls `clearHistoryAll()`).
+   Checked against the built jar: unset → 404/404/404; set → 401 (none), 401 (wrong), 200 (right).
+   The smoke test also checks the 404 at the end of the run.
+2. **Pricing and model id.** I checked both on 2026-10-17:
+   - https://platform.claude.com/docs/en/about-claude/pricing lists Claude Sonnet 5.5 at
+     $2 / MTok input and $10 / MTok output (5 m cache write $2.50, cache hit $0.10).
+   - https://platform.claude.com/docs/en/about-claude/models/overview lists `claude-sonnet-5-5`
+     as a current model (retirement not before 2027-09-28).
+   So the defaults (2.0 / 10.0) were already right; only the comment calling them placeholders
+   was wrong. I replaced it with the source links. One small inaccuracy remains: `LlmBudget.cost()`
+   prices cache reads at 0.1× input, while Sonnet 5.5 bills 0.05×. The estimate errs high, which is
+   the safe side for the spend cap, so I left the code unchanged.
+3. **Compose exposure.** `docker compose config` (with and without the prod override) publishes
+   only `triage` (`127.0.0.1:8080` by default) and, in prod, Caddy on 80/443. No estate service
+   has `ports:`, so their `/chaos` and `/ops/admin/*` endpoints are reachable only inside the
+   compose network. Caddy proxies only to `triage:8080`.
+
+**Decision for the owner:** the triage app's own `POST /api/chaos/{id}` and `/api/chaos/none`
+are still public by design (the chaos panel). On a public deployment, any visitor can inject or
+clear a fault while someone else is investigating. Options: put it behind the same admin
+token, or rate-limit it. I have not changed it.

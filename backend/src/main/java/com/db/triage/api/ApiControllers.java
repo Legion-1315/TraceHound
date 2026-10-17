@@ -24,6 +24,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,6 +33,8 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api")
 public class ApiControllers {
+
+    static final String ADMIN_TOKEN_HEADER = "X-Admin-Token";
 
     private final TopologyService topology;
     private final IncidentService incidents;
@@ -47,13 +51,15 @@ public class ApiControllers {
     private final LlmInvestigator llm;
     private final LlmBudget budget;
     private final boolean trustForwardedFor;
+    private final String adminToken;
 
     public ApiControllers(TopologyService topology, IncidentService incidents, EvidenceLedger ledger,
                           ScenarioService scenarios, SimulationEngine sim, InvestigationEventPublisher events,
                           IncidentHistoryService history, TelemetryRouter telemetry, LiveEstateClient estate,
                           LiveFaultCatalog liveFaults, LiveChaosService liveChaos, AlertMonitor alerts,
                           LlmInvestigator llm, LlmBudget budget,
-                          @Value("${triage.trust-forwarded-for:false}") boolean trustForwardedFor) {
+                          @Value("${triage.trust-forwarded-for:false}") boolean trustForwardedFor,
+                          @Value("${triage.admin-token:}") String adminToken) {
         this.topology = topology;
         this.incidents = incidents;
         this.ledger = ledger;
@@ -69,6 +75,7 @@ public class ApiControllers {
         this.llm = llm;
         this.budget = budget;
         this.trustForwardedFor = trustForwardedFor;
+        this.adminToken = adminToken == null ? "" : adminToken.trim();
     }
 
     /** What the UI needs to label itself honestly: which estate, which investigator, which model. */
@@ -257,9 +264,20 @@ public class ApiControllers {
         return Map.of("active", def.id());
     }
 
-    /** Live estate: wipe logs, metrics and change history on every service (used by the eval harness). */
+    /**
+     * Live estate: wipe logs, metrics and change history on every service (used by the eval harness).
+     * On a public demo this would let any visitor erase evidence mid-investigation, so it needs the
+     * {@code TRIAGE_ADMIN_TOKEN} in an {@code X-Admin-Token} header, and does not exist when no token is set.
+     */
     @PostMapping("/chaos/admin/clear-history")
-    public Map<String, Object> clearHistory() {
+    public Map<String, Object> clearHistory(@RequestHeader(value = ADMIN_TOKEN_HEADER, required = false) String token) {
+        if (adminToken.isEmpty()) {
+            throw new ResponseStatusExceptionAdapter(HttpStatus.NOT_FOUND, "Not found");
+        }
+        if (token == null || !MessageDigest.isEqual(adminToken.getBytes(StandardCharsets.UTF_8),
+                token.trim().getBytes(StandardCharsets.UTF_8))) {
+            throw new ResponseStatusExceptionAdapter(HttpStatus.UNAUTHORIZED, "Missing or wrong " + ADMIN_TOKEN_HEADER);
+        }
         if (!telemetry.isLive()) {
             throw new ResponseStatusExceptionAdapter(HttpStatus.BAD_REQUEST, "Only available for the live estate");
         }
