@@ -87,3 +87,27 @@ Problems found on the way:
 are still public by design (the chaos panel). On a public deployment, any visitor can inject or
 clear a fault while someone else is investigating. Options: put it behind the same admin
 token, or rate-limit it. I have not changed it.
+
+### Task 2 follow-up: the first CI smoke run found a real race in the gateway
+
+CI run 39011030491 (commit `0cfbb56`) failed on `duplicate-trades`: no error alert on the gateway
+within 150 s, and every service showed about 238/min instead of 120. The duplicates were
+being **reported to the regulator** instead of rejected. Cause: `RegulatoryGateway` checked
+`reported.contains(id)` before the ARM call but added the id only after the ARM answered.
+The two copies of a trade travel in parallel (4 enrichment consumers, 4 sealing threads) and
+reach the gateway milliseconds apart, so both passed the check. On my machine the timing
+happened to serialise them; on the CI runner it did not.
+
+Fix: claim the reference with an atomic `reported.add(id)` before calling the ARM, and release
+it if the submission fails, so a retry still works. New test
+`RegulatoryGatewayDuplicateTest` sends the same trade twice at once against a slow fake ARM.
+It failed on the old code (`[202, 202]`, both reported) and passes on the new one (`[202, 409]`,
+one ARM report).
+
+The same CI run also showed "recovered" 9 s after consumer-lag was cleared: a gap between one
+alert clearing and the next firing while the backlog drained. "Recovered" now means no alerts
+for 25 s in a row (at least two monitor polls).
+
+Local rerun with both fixes (run 6): PASSED. Symptom times 13 / 32 / 13 / 13 / 13 / 42 s and
+recovery 87 / 36 / 87 / 87 / 87 / 98 s, in catalogue order. Recovery includes the 25 s quiet
+period. The clear-history check returned 404.

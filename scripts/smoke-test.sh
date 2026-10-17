@@ -155,6 +155,20 @@ no_alerts() {
   [ -z "$out" ]
 }
 
+# The monitor polls every 10 s and a draining backlog can briefly look healthy between one alert
+# clearing and the next firing, so "recovered" means no alerts for QUIET_SECONDS in a row.
+QUIET_SECONDS="${SMOKE_QUIET_SECONDS:-25}"
+QUIET_SINCE=""
+quiet_for_a_while() {
+  if no_alerts; then
+    [ -n "$QUIET_SINCE" ] || QUIET_SINCE=$SECONDS
+    [ $((SECONDS - QUIET_SINCE)) -ge "$QUIET_SECONDS" ]
+  else
+    QUIET_SINCE=""
+    return 1
+  fi
+}
+
 log_has() { # <port> <level> <regex>: a matching line in the service's last 2 minutes of logs
   curl -sf "http://localhost:$1/ops/logs?minutes=2&level=$2&limit=5000" | grep -Eq "$3"
 }
@@ -181,7 +195,8 @@ curl -sf "$TRIAGE/api/mode" | grep -q '"llmConfigured":false' || fail "the triag
 
 echo "=== warm-up: healthy estate must settle with no alerts (throughput rules need 90 s of uptime)"
 sleep 30
-wait_until "$RECOVERY_TIMEOUT" "healthy estate, no active alerts" no_alerts
+QUIET_SINCE=""
+wait_until "$RECOVERY_TIMEOUT" "healthy estate, no alerts for ${QUIET_SECONDS}s" quiet_for_a_while
 
 PORT_TC=8101; PORT_RD=8102; PORT_EN=8103; PORT_SB=8104; PORT_GW=8105
 
@@ -224,7 +239,8 @@ check_fault() {
 
   chaos none >/dev/null
   [ -z "$(active_faults)" ] || fail "faults still active after reset: $(active_faults)"
-  wait_until "$RECOVERY_TIMEOUT" "estate recovers from $fault (no active alerts)" no_alerts
+  QUIET_SINCE=""
+  wait_until "$RECOVERY_TIMEOUT" "estate recovers from $fault (no alerts for ${QUIET_SECONDS}s)" quiet_for_a_while
   wait_until 30 "all six services still UP" all_up
 }
 

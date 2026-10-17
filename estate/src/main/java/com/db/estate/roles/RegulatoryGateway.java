@@ -91,7 +91,9 @@ public class RegulatoryGateway implements ChaosHandler {
             metrics.record(true, TradeCapture.elapsedMs(start));
             return ResponseEntity.unprocessableEntity().body(Map.of("rule", "ESMA-RTS22-F31"));
         }
-        if (reported.contains(tradeId)) {
+        // Claim the reference before calling the ARM: a check-then-add after the call let two copies of
+        // the same trade, arriving a few ms apart on different threads, both pass and both be reported.
+        if (!reported.add(tradeId)) {
             log.error("Submission {} rejected: duplicate transaction reference, already reported today [rule ESMA-RTS22-F01]",
                     tradeId);
             metrics.record(true, TradeCapture.elapsedMs(start));
@@ -114,21 +116,23 @@ public class RegulatoryGateway implements ChaosHandler {
                     .build();
             HttpResponse<String> response = client.http().send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() / 100 == 2) {
-                reported.add(tradeId);
                 JsonNode ack = json.readTree(response.body());
                 log.info("Submission {} accepted by ARM ack={}", tradeId, ack.path("ack").asText());
                 metrics.record(false, TradeCapture.elapsedMs(start));
                 return ResponseEntity.accepted().build();
             }
+            reported.remove(tradeId); // not reported, so a resubmission must be allowed
             log.error("ARM returned HTTP {} for submission {}", response.statusCode(), tradeId);
             metrics.record(true, TradeCapture.elapsedMs(start));
             return ResponseEntity.status(502).build();
         } catch (IOException e) {
+            reported.remove(tradeId);
             log.error("Submission {} failed: TLS/transport error calling {}: {}", tradeId,
                     armUri.getHost() + ":" + armUri.getPort(), rootMessage(e));
             metrics.record(true, TradeCapture.elapsedMs(start));
             return ResponseEntity.status(502).build();
         } catch (InterruptedException e) {
+            reported.remove(tradeId);
             Thread.currentThread().interrupt();
             return ResponseEntity.status(503).build();
         }
