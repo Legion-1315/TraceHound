@@ -8,6 +8,12 @@ on:
 permissions:
   contents: write   # lets the failure step leave a commit comment with the relevant log tail
 
+# An explicit `shell: bash` makes GitHub run `bash -eo pipefail`. Without it steps run as `bash -e`,
+# so `./gradlew test | tee log` passed even when Gradle failed (failing tests were hidden).
+defaults:
+  run:
+    shell: bash
+
 jobs:
   build:
     name: Build & test (estate, backend, frontend)
@@ -79,7 +85,6 @@ jobs:
 
       - name: Start the estate and the triage app, inject faults, check symptoms
         run: |
-          if [ ! -f scripts/smoke-test.sh ]; then echo "no smoke test yet"; exit 0; fi
           bash scripts/smoke-test.sh 2>&1 | tee ci-smoke.log
 
       - name: Collect service logs

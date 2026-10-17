@@ -3,3 +3,6 @@
 .env.*
 !.env.example
 *.p12.local
+
+# Smoke-test run directory (logs, scratch data)
+.run/
