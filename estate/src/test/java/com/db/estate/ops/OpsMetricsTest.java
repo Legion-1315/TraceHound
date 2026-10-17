@@ -37,7 +37,8 @@ class OpsMetricsTest {
         MutableClock clock = new MutableClock();
         OpsMetrics metrics = new OpsMetrics(120, clock);
         for (int i = 0; i < 100; i++) {
-            metrics.record(i < 25, i < 95 ? 10 : 900);
+            // 6% slow: with exactly 5% the nearest-rank p95 (95th of 100 sorted) is still a fast sample
+            metrics.record(i < 25, i < 94 ? 10 : 900);
             if (i % 10 == 9) {
                 clock.now = clock.now.plusSeconds(1);
             }

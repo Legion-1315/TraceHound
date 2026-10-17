@@ -1,5 +1,6 @@
 package com.db.triage.llm;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -55,6 +56,7 @@ public class LlmBudget {
     private int investigationsToday;
     private double costToday;
 
+    @Autowired
     public LlmBudget(@Value("${triage.llm.max-investigations-per-client-per-hour:5}") int perClientPerHour,
                      @Value("${triage.llm.max-investigations-per-day:40}") int perDay,
                      @Value("${triage.llm.max-daily-cost-usd:5.0}") double dailyCostUsd,

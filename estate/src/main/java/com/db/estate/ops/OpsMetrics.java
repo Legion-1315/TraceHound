@@ -1,5 +1,6 @@
 package com.db.estate.ops;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -42,6 +43,7 @@ public class OpsMetrics {
     private final long[][] latencies = new long[WINDOW_SECONDS][SAMPLES_PER_SECOND];
     private final int[] latencyCount = new int[WINDOW_SECONDS];
 
+    @Autowired
     public OpsMetrics(@Value("${estate.baseline-per-min:120}") double baselinePerMin) {
         this(baselinePerMin, Clock.systemUTC());
     }

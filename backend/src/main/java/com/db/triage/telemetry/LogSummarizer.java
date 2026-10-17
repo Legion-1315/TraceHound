@@ -33,7 +33,8 @@ public final class LogSummarizer {
             Map.entry(Pattern.compile("\\bc-[0-9a-f]{8}\\b"), "<corr>"),
             Map.entry(Pattern.compile("\\b[0-9a-f]{16,}\\b"), "<hex>"),
             Map.entry(Pattern.compile("\\d{4}-\\d{2}-\\d{2}T[0-9:.]+Z"), "<ts>"),
-            Map.entry(Pattern.compile("\\b\\d+(\\.\\d+)?\\b"), "<n>"));
+            // not \b: "34ms" has no word boundary after the digits; still skip digits inside tokens like RTS22
+            Map.entry(Pattern.compile("(?<![A-Za-z0-9_.])\\d+(\\.\\d+)?(?!\\d)"), "<n>"));
 
     private LogSummarizer() {
     }
