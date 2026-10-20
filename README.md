@@ -5,16 +5,27 @@ production alerts the way a senior SRE would: scope the business flow, rank hypo
 cheapest decisive checks first, walk the dependency graph following evidence, and produce a triage
 report where **every claim cites a recorded evidence-ledger entry**.
 
-Everything — services, telemetry, change events — is simulated in-process. No Kafka, no Neo4j,
-no real infrastructure: it runs on any laptop with Java and Node.
+It has two modes:
+
+- **Live mode** (the real thing): six real services plus a mock regulator, real injected faults,
+  and a real Claude agent that investigates them. **You run it on your own machine with your own
+  Anthropic API key.**
+- **Simulated mode** (the original hackathon demo): telemetry is simulated in-process and a
+  scripted investigator replays a correct investigation. No key, no network.
+
+> **Live mode is not hosted anywhere.** It needs eight JVMs (about 3 GB of RAM by the compose
+> memory limits), more than free hosting tiers give, and every investigation is a paid Claude API
+> call, so a public deployment would spend the owner's money for each visitor. To try the
+> analysis, run it locally with your own key as described below; you control and pay for your own
+> usage. (Only the simulated demo, which makes no API calls, may be deployed for free.)
 
 ## Prerequisites
 
-- Java 21+ (tested on Java 25)
-- Node 18+ (tested on Node 26)
-- No API key needed — the default **scripted mode** replays a correct investigation with realistic
-  pacing and never touches the network. Optional: set `ANTHROPIC_API_KEY` + `TRIAGE_MODE=llm` for
-  the live LLM agent.
+- Java 21+ (tested on Java 21 in CI and Java 25 locally)
+- Node 18+ (tested on Node 22 in CI and Node 26 locally) to build the UI
+- For live investigations: an Anthropic API key (https://platform.claude.com). Without one,
+  live mode still runs the estate, faults, alerts and UI, but an investigation cannot start.
+- Optional: Docker, for the `docker compose` route
 
 ## Live mode: real services + real Claude agent
 
@@ -23,14 +34,32 @@ trades to each other over HTTP and keep real logs and metrics. The triage app in
 with a live Claude agent; any free-text alert works, and the agent reports *out of scope* or
 *no fault found* when that is the honest answer. There is no scripted fallback in this mode.
 
+**1. Put your key in `.env`** (git-ignored; never commit it):
+
 ```bash
-cp .env.example .env          # then put your ANTHROPIC_API_KEY in .env (git-ignored)
+cp .env.example .env          # then set ANTHROPIC_API_KEY=... in .env
+```
+
+**2. Start everything.** Either with plain Java (no Docker needed):
+
+```bash
+bash scripts/run-local.sh     # builds the jars on first run; Ctrl+C stops all eight processes
+```
+
+or with Docker:
+
+```bash
 docker compose up --build     # first build takes a few minutes
 ```
 
-Open **http://localhost:8080**, open the chaos panel (Ctrl+Shift+K), inject a real fault
-(e.g. rename a field in ref-data, expire the gateway's TLS cert), wait for the alert or type
-your own, and watch the agent investigate the running services.
+**3. Investigate.** Open **http://localhost:8080**, open the chaos panel (Ctrl+Shift+K) and press
+**Inject** on a fault (e.g. rename a field in ref-data, expire the gateway's TLS cert). Within
+10-50 s a firing alert appears on the left. Press **Investigate** on it, or type your own alert,
+and watch the agent investigate the running services. **Restore all** in the chaos panel heals
+the estate.
+
+Without a key in `.env`, steps 2 and 3 still work up to the investigation, which then says that no
+API key is configured. Restart after adding the key.
 
 **Your API key never goes into git.** It lives only in `.env` (ignored by `.gitignore`) or in
 your host's environment variables. Spending guard-rails, all overridable in `.env`: at most 5
@@ -42,11 +71,13 @@ used by evaluation runs) exists only when `TRIAGE_ADMIN_TOKEN` is set, and then 
 in an `X-Admin-Token` header. Leave it unset on a public demo.
 
 **What has been verified so far:** the six faults, their alerts and recovery, run against the
-real services without an LLM by `scripts/smoke-test.sh` (locally and in CI), and the compose
-images build in CI. An end-to-end run with the Claude agent has **not** been done yet; results
-will go in `docs/TASK_LOG.md`.
+real services without an LLM by `scripts/smoke-test.sh` (locally and in CI); the compose images
+build in CI; and `scripts/run-local.sh` plus the UI flow without a key (inject from the chaos
+panel, alert appears, "no API key" message on Investigate, Restore all, alerts clear), tested
+locally. An end-to-end run with the Claude agent has **not** been done yet; results will go in
+`docs/TASK_LOG.md`.
 
-## Start (one process, one port)
+## Simulated mode (no API key): one process, one port
 
 The React app is compiled and folded into the Spring Boot jar, so a single command serves the UI,
 the REST API and the WebSocket stream together on **:8080** — no reverse proxy, no CORS, no second
@@ -69,7 +100,13 @@ cd backend && ./gradlew bootJar && java -jar build/libs/backend-0.0.1-SNAPSHOT.j
 That one jar is the whole demo — copy it to any machine with a JRE and run it. `docker compose up
 --build` produces the equivalent single container.
 
-## Deploy the live demo to an Oracle Cloud Always Free VM
+## Hosting it yourself (optional, not maintained)
+
+Live mode is not hosted (see the note at the top). The sections below are kept for anyone who
+wants to host their own copy at their own cost. The Cloud Run and Render recipes deploy the
+**simulated** demo; only the VM recipe runs live mode.
+
+### Live mode on a VM (e.g. an Oracle Cloud Always Free instance)
 
 > **Not yet tried on a real VM.** The steps below have not been run end to end; the compose files
 > they use build in CI. The "about 3 GB of RAM" figure comes from the compose `mem_limit`s
@@ -105,7 +142,7 @@ An Always Free Ampere (ARM) VM has up to 24 GB.
    Then open `https://140-238-1-2.sslip.io`. Containers restart on their own after a reboot.
 6. **Update later:** `git pull` and run the same command again.
 
-## Deploy to Google Cloud Run
+### Simulated demo on Google Cloud Run
 
 The image is a single container serving UI + API + WebSocket, so Cloud Run needs no extra plumbing.
 `server.port` reads Cloud Run's injected `$PORT`.
@@ -134,7 +171,7 @@ Run it from the repo root (where the `Dockerfile` is). The three non-obvious fla
 | `--no-cpu-throttling` | The investigation runs on a background executor after the POST returns. Cloud Run throttles CPU between requests by default, which would stall it mid-stream. |
 | `--min-instances 1` | Keeps the instance warm. A cold start reseeds incident history and wipes incident memory — see the caveat below. |
 
-### Building the image yourself (optional)
+#### Building the image yourself (optional)
 
 ```bash
 gcloud artifacts repositories create demo --repository-format=docker --location=europe-west2
@@ -149,7 +186,7 @@ gcloud run deploy code-catalyst \
   --memory 1Gi --min-instances 1 --max-instances 1 --no-cpu-throttling
 ```
 
-### LLM mode — use Secret Manager, never `--set-env-vars`
+#### LLM mode — use Secret Manager, never `--set-env-vars`
 
 An API key passed as a plain env var is visible in the service YAML, in deploy logs and to anyone
 with Console read access. Store it as a secret:
@@ -165,7 +202,7 @@ gcloud run services update code-catalyst --region europe-west2 \
 Grant the service account `roles/secretmanager.secretAccessor` if the deploy reports it can't read
 the secret. **Scripted mode is the default and needs no key** — for a live demo, leave it that way.
 
-### Caveat: state is ephemeral on Cloud Run
+#### Caveat: state is ephemeral on Cloud Run
 
 `data/incident-history.json` and `data/incident-memory.json` live on the container's in-memory
 filesystem. They survive for the life of an instance but not a restart, so on a cold start the
@@ -174,7 +211,7 @@ also resets the learning-loop demo beat. `--min-instances 1` keeps this from bit
 durable history, point `TRIAGE_HISTORY_FILE` / `TRIAGE_MEMORY_FILE` at a GCS bucket mounted with
 gcsfuse (Cloud Run volume mounts), or move the two stores to Firestore.
 
-## Deploy to Render (free)
+### Simulated demo on Render (free)
 
 A `render.yaml` blueprint is included — Render builds straight from the existing `Dockerfile`,
 no changes needed. `server.port` already reads Render's injected `$PORT` the same way it reads
@@ -190,7 +227,7 @@ Cloud Run's.
 `TRIAGE_MODE=scripted` (the default, no API key needed) is already set in `render.yaml` — no
 manual environment setup required for a demo.
 
-### Caveat: free tier sleeps + ephemeral state
+#### Caveat: free tier sleeps + ephemeral state
 
 Render's free tier spins the service down after ~15 minutes of no traffic; the next request
 triggers a cold start (~30-60s). Like Cloud Run, `data/incident-history.json` and
@@ -198,13 +235,13 @@ triggers a cold start (~30-60s). Like Cloud Run, `data/incident-history.json` an
 the analytics corpus and wipes learned incident memory — same caveat as Cloud Run, just triggered
 by inactivity instead of scale-to-zero. Load the app a minute or two before a live demo to warm it up.
 
-### LLM mode on Render
+#### LLM mode on Render
 
 Set `TRIAGE_MODE=llm` and `ANTHROPIC_API_KEY` as environment variables in the Render dashboard
 (**Environment** tab on the service) — never commit them to `render.yaml` or any other file in
 the repo.
 
-### Optional: frontend dev server (hot reload)
+## Frontend dev server (hot reload, optional)
 
 Only needed when iterating on UI code and you want HMR. Run the backend as above, then:
 

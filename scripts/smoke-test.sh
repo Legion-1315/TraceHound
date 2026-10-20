@@ -18,6 +18,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 RUN_DIR="$ROOT/.run"
+# Every estate profile reads server.port from ${PORT:<its default>}, so an inherited PORT (set by
+# PaaS shells and some launchers) would send all seven services to the same port.
+unset PORT
 LOG_DIR="$RUN_DIR/logs"
 TRIAGE="http://localhost:8080"
 SYMPTOM_TIMEOUT="${SMOKE_SYMPTOM_TIMEOUT:-150}"

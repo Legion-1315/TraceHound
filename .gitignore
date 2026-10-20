@@ -6,3 +6,6 @@
 
 # Smoke-test run directory (logs, scratch data)
 .run/
+
+# Runtime data written by the triage app when run from the repo root (scripts/run-local.sh)
+/data/

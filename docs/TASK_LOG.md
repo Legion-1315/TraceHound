@@ -134,3 +134,32 @@ period. The clear-history check returned 404.
   the 3 GB figure comes from `mem_limit`s). Tests documents the estate tests and the smoke test.
   "Honest limitations" adds: LLM accuracy not measured yet, the public chaos API, alert lag
   (measured), and cost estimates that err high.
+
+## Local end-to-end check (2026-10-20), without an API key
+
+The owner asked for a full local test before updating the README, and said to leave tasks 4 and 5
+(LLM spend) for later. There is no `.env` on this machine, so no Claude call was possible or made.
+
+- **Docker route: not tested locally.** Docker Desktop would not start on this machine (its
+  process exits at once, and WSL has no distributions, so the `docker-desktop` distro is
+  missing). Repairing that means reinstalling system components, which is the owner's call. The
+  compose images do build in CI (`Docker images build` job, green).
+- **New `scripts/run-local.sh`:** runs the whole live stack (7 estate processes and the triage
+  app) with plain Java, no Docker, and stops everything on Ctrl+C. Tested: all six services UP,
+  regulator on 8443, `/api/mode` = live, `llmConfigured: false`. Nothing was left running after stop.
+- **Bug found and fixed: an inherited `PORT` broke the estate.** The first two starts failed
+  because the launcher had `PORT=8080` set, and every estate profile reads
+  `server.port=${PORT:<default>}`. ref-data-service took 8080 and the triage app could not bind.
+  Any shell with `PORT` set (PaaS shells, some IDE launchers) hits the same problem. Both
+  `run-local.sh` and `smoke-test.sh` now `unset PORT` first.
+- **UI flow without a key (browser):** the page loads with no failed requests; Ctrl+Shift+K →
+  **Inject** on Schema Drift makes `/api/chaos` show `schema-drift`, and alerts fire within
+  seconds: gateway error rate (21% rising to 50%) and trade-confirmations (23% → 51%), which reads
+  the same ref-data field. **Investigate** shows "no API key is configured. Put
+  ANTHROPIC_API_KEY in the .env file at the repo root and restart", and the budget counter stays
+  at 0. **Restore all** clears the fault, and alerts stayed at zero for 25 s from 89 s after the
+  restore.
+- **README:** says live mode is not hosted (memory and per-investigation API cost) and that you
+  run it locally with your own key; documents both start routes (`run-local.sh` and compose) and
+  the keyless behaviour; moves the hosting recipes under "Hosting it yourself (optional, not
+  maintained)".
