@@ -1,3 +1,4 @@
+import { agentLabel } from './types'
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { useTriageStore } from './store'
 import { api } from './api'
@@ -153,12 +154,12 @@ export default function App() {
                 ? 'border-violet-700 bg-violet-950/40 text-violet-300'
                 : 'border-slate-700 bg-slate-900 text-slate-400'}`}
               title={live
-                ? 'Real services, real faults, real Claude agent'
+                ? `Real services, real faults, ${agentLabel(modeInfo)}`
                 : 'In-process simulated telemetry'}
             >
               {live ? 'Live estate' : 'Simulated estate'} ·{' '}
               {modeInfo.investigator === 'llm'
-                ? `Claude agent${modeInfo.model ? ` (${modeInfo.model})` : ''}`
+                ? agentLabel(modeInfo)
                 : 'scripted replay'}
               {live && !modeInfo.llmConfigured && <span className="ml-1 text-rose-400">— no API key</span>}
             </span>

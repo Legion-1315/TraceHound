@@ -100,6 +100,8 @@ export interface ModeInfo {
   estate: 'simulated' | 'live'
   investigator: 'llm' | 'scripted'
   llmConfigured: boolean
+  /** "anthropic" (Claude) or "ollama" (a local model) */
+  provider?: string
   model: string | null
   budget: {
     investigationsToday: number
@@ -159,4 +161,10 @@ export interface FeedItem {
   tool?: string
   ledgerId?: number
   at: string
+}
+
+/** "Claude agent (model)" or "Local agent via Ollama (model)", for the mode labels. */
+export function agentLabel(info: { provider?: string; model: string | null } | null | undefined): string {
+  const name = info?.provider === 'ollama' ? 'Local agent via Ollama' : 'Claude agent'
+  return info?.model ? `${name} (${info.model})` : name
 }

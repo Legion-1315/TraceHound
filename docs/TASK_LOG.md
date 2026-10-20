@@ -163,3 +163,30 @@ The owner asked for a full local test before updating the README, and said to le
   run it locally with your own key; documents both start routes (`run-local.sh` and compose) and
   the keyless behaviour; moves the hosting recipes under "Hosting it yourself (optional, not
   maintained)".
+
+## Free local model option: Ollama (2026-10-20)
+
+The owner asked for a free alternative to the paid Claude API. Added `LLM_PROVIDER=ollama`:
+
+- `OllamaClient` implements the existing `LlmClient` interface. The agent loop still speaks the
+  Anthropic Messages format; the client translates each request to Ollama's **native**
+  `/api/chat` (system, assistant `tool_calls`, `tool` results, function tools) and the reply back to
+  Anthropic-style `text` / `tool_use` blocks with `stop_reason` and token usage. The native endpoint
+  was chosen over Ollama's OpenAI-compatible one because only the native one can raise
+  `num_ctx`; Ollama's default context is far too small for an investigation.
+- `LlmConfig` picks the client from `LLM_PROVIDER` (default `anthropic`, unchanged behaviour).
+  Local tokens cost 0 in the usage/cost figures. The UI labels the agent "Local agent via
+  Ollama (model)" instead of "Claude agent".
+- **Bug fixed on the Claude path at the same time:** when the tool budget ran out, the agent forced
+  the report with `tool_choice: {type: "tool", name: "submit_report"}`. Per the current API docs,
+  `claude-sonnet-5-5` (the default model) rejects a forced `tool_choice` with HTTP 400, so any real
+  investigation that used all 12 tool calls would have failed instead of returning an inconclusive
+  report. The wrap-up is now requested with a text instruction on the last turn (`FORCE_REPORT`).
+  `LlmInvestigatorTest.toolBudgetIsEnforcedAndTheReportIsForced` was changed to detect that
+  instruction instead of `tool_choice`, and now also asserts that no request sends `tool_choice`.
+  The test's purpose (budget enforced, report forced) is unchanged.
+- Tests: `OllamaClientTest` (6): request translation, reply translation (including `<think>` blocks
+  and string-encoded arguments), a call against a fake Ollama server, a clear "ollama pull <model>"
+  error for a missing model, a clear "is it running?" error, and not billed. Backend: 37/37 pass.
+- **Not yet done: a real investigation on a local model.** Ollama is not installed on this machine
+  (RTX 2050 with 4 GB VRAM, 16 GB RAM). Installing it needs the owner's OK.

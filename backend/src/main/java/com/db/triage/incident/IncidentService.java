@@ -85,7 +85,8 @@ public class IncidentService {
         String mode = effectiveMode();
         if (mode.equals("llm") && !llm.available()) {
             throw new CannotStartException("The live estate is investigated by the Claude agent, but no API key "
-                    + "is configured. Put ANTHROPIC_API_KEY in the .env file at the repo root and restart.");
+                    + "is configured. Put ANTHROPIC_API_KEY in the .env file at the repo root and restart, "
+                    + "or use a free local model with LLM_PROVIDER=ollama (see README).");
         }
 
         ScenarioDef scenario = null;

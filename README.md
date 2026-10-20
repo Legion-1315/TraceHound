@@ -61,6 +61,31 @@ the estate.
 Without a key in `.env`, steps 2 and 3 still work up to the investigation, which then says that no
 API key is configured. Restart after adding the key.
 
+### Free alternative: a local model with Ollama
+
+No API key and no bill: the agent can run on an open model on your own machine through
+[Ollama](https://ollama.com). Expect slower investigations and more mistakes than with Claude,
+especially with small models; this demo's harder faults (a decoy deployment, a latency spike
+with zero errors) need multi-step reasoning and careful evidence citing.
+
+```bash
+# 1. install Ollama (https://ollama.com/download, or on Windows: winget install Ollama.Ollama)
+ollama pull qwen3:8b          # about 5 GB; qwen3:4b (about 2.5 GB) for machines with little RAM/VRAM
+# 2. in .env
+LLM_PROVIDER=ollama
+OLLAMA_MODEL=qwen3:8b
+# 3. start as usual
+bash scripts/run-local.sh
+```
+
+Pick the largest model with good tool calling that your machine runs comfortably. As a rough
+guide, an 8B model at 4-bit wants about 6 GB of free GPU memory or RAM on top of the ~3 GB the
+estate uses, and it is much slower on CPU alone. Optional settings: `OLLAMA_NUM_CTX` (context
+window, default 16384; Ollama's own default is too small for an investigation), `OLLAMA_THINK=true`
+(reasoning mode: more accurate, much slower), `OLLAMA_TIMEOUT_SECONDS` (default 300 per model call).
+Local tokens are not counted against the spend cap; the per-hour and per-day investigation limits
+still apply and can be raised in `.env`.
+
 **Your API key never goes into git.** It lives only in `.env` (ignored by `.gitignore`) or in
 your host's environment variables. Spending guard-rails, all overridable in `.env`: at most 5
 investigations per visitor per hour, 40 per day, US$5 of estimated spend per day, and 2 at once.

@@ -1,3 +1,4 @@
+import { agentLabel } from '../types'
 import { useEffect, useRef, useState } from 'react'
 import { useTriageStore } from '../store'
 
@@ -131,7 +132,7 @@ export default function ChatPanel() {
         {incidentId && (
           <span className="text-[10px] text-slate-600">
             {incidentId} · <span className={mode === 'llm' ? 'text-violet-400' : 'text-emerald-500'}>
-              {mode === 'llm' ? `Claude agent${modeInfo?.model ? ` (${modeInfo.model})` : ''}` : 'scripted replay'}
+              {mode === 'llm' ? agentLabel(modeInfo) : 'scripted replay'}
             </span>
           </span>
         )}

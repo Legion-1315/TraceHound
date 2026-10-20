@@ -42,6 +42,8 @@ public class LlmInvestigator {
 
     static final int MAX_TOOL_CALLS = 12;
     static final int MAX_API_CALLS = 24;
+    static final String FORCE_REPORT = "Stop investigating now: call submit_report in this turn with what you "
+            + "have (use outcome INCONCLUSIVE if the evidence is not enough). Do not call any other tool.";
     private static final int MAX_TOOL_RESULT_CHARS = 8000;
     private static final Set<String> NODE_STATUSES = Set.of("PROBING", "CLEARED", "SUSPECT", "ROOT_CAUSE");
     private static final Set<String> OUTCOMES = Set.of(TriageReport.ROOT_CAUSE_FOUND, TriageReport.INCONCLUSIVE,
@@ -83,6 +85,10 @@ public class LlmInvestigator {
 
     public String model() {
         return llm.model();
+    }
+
+    public String provider() {
+        return llm.provider();
     }
 
     public TriageReport investigate(Incident incident) throws LlmClient.LlmException {
@@ -228,12 +234,13 @@ public class LlmInvestigator {
         if (last.isArray() && !last.isEmpty()) {
             ((ObjectNode) last.get(last.size() - 1)).putObject("cache_control").put("type", "ephemeral");
         }
-        body.set("messages", msgs);
         if (forceReport) {
-            ObjectNode choice = body.putObject("tool_choice");
-            choice.put("type", "tool");
-            choice.put("name", "submit_report");
+            // Newer models (claude-sonnet-5-5 among them) reject a forced tool_choice with a 400, and
+            // local models ignore it, so the wrap-up is asked for in the conversation instead.
+            ArrayNode lastContent = (ArrayNode) msgs.get(msgs.size() - 1).path("content");
+            lastContent.addObject().put("type", "text").put("text", FORCE_REPORT);
         }
+        body.set("messages", msgs);
         return body;
     }
 
@@ -423,7 +430,7 @@ public class LlmInvestigator {
         long out = u.path("output_tokens").asLong();
         long cacheRead = u.path("cache_read_input_tokens").asLong();
         long cacheWrite = u.path("cache_creation_input_tokens").asLong();
-        double cost = budget.cost(in, out, cacheRead, cacheWrite);
+        double cost = llm.billed() ? budget.cost(in, out, cacheRead, cacheWrite) : 0.0;
         budget.recordCost(cost);
         AgentUsage next = usage.plus(in, out, cacheRead, cacheWrite, cost);
         incident.setUsage(next);

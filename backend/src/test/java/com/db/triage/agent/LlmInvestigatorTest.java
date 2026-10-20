@@ -158,7 +158,7 @@ class LlmInvestigatorTest {
     void toolBudgetIsEnforcedAndTheReportIsForced() throws Exception {
         model.script(turn -> {
             ArrayNode b = blocks();
-            boolean forced = turn.request().path("tool_choice").path("name").asText().equals("submit_report");
+            boolean forced = turn.request().toString().contains(LlmInvestigator.FORCE_REPORT);
             if (!forced) {
                 toolUse(b, "query_metrics").put("serviceId", "trade-capture");
             } else {
@@ -178,7 +178,9 @@ class LlmInvestigatorTest {
         assertEquals(LlmInvestigator.MAX_TOOL_CALLS, report.toolCallCount());
         assertEquals(TriageReport.INCONCLUSIVE, report.outcome());
         assertTrue(report.inconclusive());
-        assertTrue(model.requests.stream().anyMatch(r -> r.has("tool_choice")));
+        // the wrap-up is asked for in the conversation: forced tool_choice is a 400 on newer Claude models
+        assertTrue(model.requests.stream().anyMatch(r -> r.toString().contains(LlmInvestigator.FORCE_REPORT)));
+        assertTrue(model.requests.stream().noneMatch(r -> r.has("tool_choice")));
     }
 
     @Test

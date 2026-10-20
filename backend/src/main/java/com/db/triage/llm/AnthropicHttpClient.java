@@ -5,8 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.net.URI;
@@ -19,9 +17,8 @@ import java.util.Set;
 /**
  * Calls the Anthropic Messages API. The key comes from ANTHROPIC_API_KEY (environment or the
  * git-ignored .env file) and is only ever sent in the x-api-key header — never logged, never
- * returned by any endpoint, never sent to the browser.
+ * returned by any endpoint, never sent to the browser. Created by {@link LlmConfig}.
  */
-@Service
 public class AnthropicHttpClient implements LlmClient {
 
     private static final Logger log = LoggerFactory.getLogger(AnthropicHttpClient.class);
@@ -34,9 +31,7 @@ public class AnthropicHttpClient implements LlmClient {
     private final ObjectMapper json = new ObjectMapper();
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).build();
 
-    public AnthropicHttpClient(@Value("${triage.anthropic.api-key:}") String apiKey,
-                               @Value("${triage.anthropic.model}") String model,
-                               @Value("${triage.anthropic.base-url:https://api.anthropic.com}") String baseUrl) {
+    public AnthropicHttpClient(String apiKey, String model, String baseUrl) {
         this.apiKey = apiKey == null ? "" : apiKey.trim();
         this.model = model;
         this.endpoint = URI.create(baseUrl.replaceAll("/+$", "") + "/v1/messages");

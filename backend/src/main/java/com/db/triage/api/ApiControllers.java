@@ -85,6 +85,7 @@ public class ApiControllers {
         out.put("estate", telemetry.kind());
         out.put("investigator", incidents.effectiveMode());
         out.put("llmConfigured", llm.available());
+        out.put("provider", llm.provider());
         out.put("model", llm.available() ? llm.model() : null);
         out.put("budget", budget.status());
         return out;
