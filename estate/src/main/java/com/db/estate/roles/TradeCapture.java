@@ -43,7 +43,9 @@ public class TradeCapture implements ChaosHandler {
         this.identity = identity;
     }
 
-    @Scheduled(initialDelay = 5000, fixedRateString = "${estate.trade-interval-ms:500}")
+    // fixedDelay, not fixedRate: after a pause (laptop sleep, long GC) fixedRate runs every missed tick
+    // back to back, which flooded the estate with ~28k trades/min after a night asleep.
+    @Scheduled(initialDelay = 5000, fixedDelayString = "${estate.trade-interval-ms:500}")
     public void captureTrade() {
         Trade trade = EstateData.randomTrade();
         MDC.put("corr", trade.correlationId());

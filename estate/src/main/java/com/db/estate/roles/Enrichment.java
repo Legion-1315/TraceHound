@@ -151,7 +151,7 @@ public class Enrichment implements ChaosHandler {
         }
     }
 
-    @Scheduled(initialDelay = 15000, fixedRate = 15000)
+    @Scheduled(initialDelay = 15000, fixedDelay = 15000)
     public void reportLag() {
         int lag = queue.size();
         if (lag > 200) {

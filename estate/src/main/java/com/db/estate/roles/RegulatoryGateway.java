@@ -138,7 +138,7 @@ public class RegulatoryGateway implements ChaosHandler {
         }
     }
 
-    @Scheduled(initialDelay = 20000, fixedRate = 15000)
+    @Scheduled(initialDelay = 20000, fixedDelay = 15000)
     public void submissionWatchdog() {
         long silentFor = (System.currentTimeMillis() - lastReceived.get()) / 1000;
         if (silentFor >= 30) {
@@ -147,7 +147,7 @@ public class RegulatoryGateway implements ChaosHandler {
     }
 
     /** Certificate inventory, as a gateway would report it on every new TLS session. */
-    @Scheduled(initialDelay = 5000, fixedRate = 60000)
+    @Scheduled(initialDelay = 5000, fixedDelay = 60000)
     public void certificateInventory() {
         X509Certificate cert = (certificateLapsed ? lapsed : current).certificate();
         log.info("TLS client certificate in use for {}: subject=\"{}\" serial={} notBefore={} notAfter={}",

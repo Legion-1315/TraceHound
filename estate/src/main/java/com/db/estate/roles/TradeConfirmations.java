@@ -38,7 +38,7 @@ public class TradeConfirmations {
         this.metrics = metrics;
     }
 
-    @Scheduled(initialDelay = 6000, fixedRateString = "${estate.confirmation-interval-ms:1000}")
+    @Scheduled(initialDelay = 6000, fixedDelayString = "${estate.confirmation-interval-ms:1000}")
     public void dispatchConfirmation() {
         Trade trade = EstateData.randomTrade();
         long start = System.nanoTime();
