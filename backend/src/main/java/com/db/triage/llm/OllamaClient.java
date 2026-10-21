@@ -26,6 +26,13 @@ import java.util.regex.Pattern;
 public class OllamaClient implements LlmClient {
 
     private static final Pattern THINK = Pattern.compile("(?s)<think>.*?</think>");
+    /**
+     * Small local models narrate at length before every tool call (600-1,100 tokens a turn measured with
+     * qwen3:4b), which at laptop speeds is minutes per turn and fills the context window. Asking for
+     * brevity is the cheapest fix.
+     */
+    static final String BREVITY = "Keep your written reasoning short: at most two sentences before each "
+            + "tool call. Do not restate the alert or the protocol.";
 
     private final String model;
     private final URI endpoint;
@@ -131,9 +138,8 @@ public class OllamaClient implements LlmClient {
                 system.append(block.path("text").asText()).append('\n');
             }
         }
-        if (!system.isEmpty()) {
-            messages.addObject().put("role", "system").put("content", system.toString().trim());
-        }
+        system.append('\n').append(BREVITY);
+        messages.addObject().put("role", "system").put("content", system.toString().trim());
 
         Map<String, String> toolNames = new HashMap<>();
         for (JsonNode msg : body.path("messages")) {

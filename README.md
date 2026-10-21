@@ -82,9 +82,16 @@ Pick the largest model with good tool calling that your machine runs comfortably
 guide, an 8B model at 4-bit wants about 6 GB of free GPU memory or RAM on top of the ~3 GB the
 estate uses, and it is much slower on CPU alone. Optional settings: `OLLAMA_NUM_CTX` (context
 window, default 16384; Ollama's own default is too small for an investigation), `OLLAMA_THINK=true`
-(reasoning mode: more accurate, much slower), `OLLAMA_TIMEOUT_SECONDS` (default 300 per model call).
+(reasoning mode: more accurate, much slower), `OLLAMA_TIMEOUT_SECONDS` (default 900 per model call).
 Local tokens are not counted against the spend cap; the per-hour and per-day investigation limits
 still apply and can be raised in `.env`.
+
+**Measured on a laptop (i5-12450H, RTX 2050 4 GB, 16 GB RAM) with `qwen3:4b`: no investigation
+finished.** Each turn took 1-5 minutes (the model did not fit the GPU and ran half on CPU, and it
+writes long reasoning before each tool call), and slower when the GPU dropped to a low-power state;
+an investigation needs 12-15 turns. Details in `docs/TASK_LOG.md`. A local model is practical with
+a GPU that holds the whole model and its context (roughly 8 GB+ of VRAM for an 8B model at 16k),
+keep the machine plugged in, on a high-performance power plan, and awake.
 
 **Your API key never goes into git.** It lives only in `.env` (ignored by `.gitignore`) or in
 your host's environment variables. Spending guard-rails, all overridable in `.env`: at most 5

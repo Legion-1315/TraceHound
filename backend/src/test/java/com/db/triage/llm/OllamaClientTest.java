@@ -58,7 +58,8 @@ class OllamaClientTest {
         JsonNode msgs = out.path("messages");
         assertEquals(5, msgs.size());
         assertEquals("system", msgs.get(0).path("role").asText());
-        assertEquals("You are an SRE.", msgs.get(0).path("content").asText());
+        assertTrue(msgs.get(0).path("content").asText().startsWith("You are an SRE."));
+        assertTrue(msgs.get(0).path("content").asText().endsWith(OllamaClient.BREVITY));
         assertEquals("user", msgs.get(1).path("role").asText());
         assertEquals("Alert: gateway errors", msgs.get(1).path("content").asText());
 

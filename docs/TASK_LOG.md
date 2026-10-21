@@ -190,3 +190,40 @@ The owner asked for a free alternative to the paid Claude API. Added `LLM_PROVID
   error for a missing model, a clear "is it running?" error, and not billed. Backend: 37/37 pass.
 - **Not yet done: a real investigation on a local model.** Ollama is not installed on this machine
   (RTX 2050 with 4 GB VRAM, 16 GB RAM). Installing it needs the owner's OK.
+
+### First real investigations on a local model (2026-10-20/21): none completed
+
+Setup: Ollama 0.40.6 (installed with winget, with the owner's OK), `qwen3:4b` (2.5 GB),
+`LLM_PROVIDER=ollama`, `num_ctx` 16384, `think` off. Machine: i5-12450H, RTX 2050 4 GB, 16 GB RAM,
+the whole live stack on the same machine via `scripts/run-local.sh`. Fault: `schema-drift`; the
+investigation was started from the UI with **Investigate** on the gateway error-rate alert.
+Ollama reported the model at 5.4 GB with a 16k context, split 56% CPU / 44% GPU.
+
+| Run | Model calls | Tool calls | Result | Per-call time (Ollama log) |
+|---|---|---|---|---|
+| 1 | 2 (+1 hung) | 2 | FAILED: 300 s timeout | 50 s, 3m29s, 1m32s, then **10h40m**: the laptop slept mid-call |
+| 2 | 6 (+1) | 5 | FAILED: 300 s timeout | 1m25s, 1m33s, 3m45s, 4m22s, 4m05s, 3m40s, then 5m00s timeout |
+| 3 | 1 (+1) | 1 | FAILED: 900 s timeout | 46 s, then 24m00s wall clock; the machine was probably suspended part of that time (the app's 15-min timer does not count suspended time) |
+| 4 | 5 (+1) | 5 | FAILED: 900 s timeout | 1m11s, 2m52s, 3m01s, 3m43s, 5m06s, then 15m00s with the GPU in P3 (210 MHz, 2% use) |
+
+What worked: tool calls translated correctly in both directions; the estate tools returned real
+evidence (gateway 100% errors, submission-builder clean, ref-data release 2.4.1 in the change
+log); hypotheses, node states and "Local agent via Ollama (qwen3:4b)" showed in the UI; cost $0.
+In run 2 the model's top hypothesis after its first evidence was the true cause ("ref-data-service
+deployment 2.4.1 (currency DTO …)", 80%). No run reached a report, so there is **no accuracy figure**.
+
+What did not: `qwen3:4b` writes 600-1,100 tokens of reasoning prose per turn even with thinking off,
+at about 14 tokens/s, and turns grow slower as the conversation grows. An investigation needs
+about 12-15 turns, i.e. 45-75 minutes even when the GPU is cooperating, and the GPU sometimes drops
+to a low-power state (run 4), after which a turn takes 15+ minutes.
+
+Changes made from these runs:
+- `fixedRate` → `fixedDelay` for every estate scheduler (committed separately): after the night's
+  sleep, trade-capture replayed every missed tick (~28k trades/min) and swamped the estate.
+- Ollama requests now end the system prompt with a brevity instruction (`OllamaClient.BREVITY`).
+  First-turn output fell from 544 to 334-380 tokens; later turns stayed at about 900 tokens.
+- Default `OLLAMA_TIMEOUT_SECONDS` 300 → 900. Kept the clear timeout message.
+- Kept the computer awake for the session (it still slept/slowed once, see run 3).
+
+Conclusion: on this laptop the local option is not practical for full investigations. Options are
+in the README's Ollama section.
