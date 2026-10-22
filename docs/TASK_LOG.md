@@ -227,3 +227,50 @@ Changes made from these runs:
 
 Conclusion: on this laptop the local option is not practical for full investigations. Options are
 in the README's Ollama section.
+
+### Tuning the local model for a 4 GB GPU (2026-10-21/22)
+
+Owner asked to tune: smaller context, KV-cache quantization, high-performance power plan.
+
+- **Power plan:** not changed by me (a system setting); the owner was asked to switch to
+  Best performance. Every run below was on **Balanced** (checked with `powercfg` and the
+  Windows 11 power-mode overlay).
+- **Ollama server**, session-scoped (`ollama serve` with `OLLAMA_FLASH_ATTENTION=1`,
+  `OLLAMA_KV_CACHE_TYPE=q8_0`; the owner's saved settings were not changed). Probe: ~500-token
+  prompt, 200 tokens generated:
+
+  | num_ctx | Ollama decides layers | all layers on GPU (`num_gpu` 99) |
+  |---|---|---|
+  | 8192 | 3.6 GB, 34% CPU / 66% GPU, gen 21.5 tok/s | 3.2 GB, 100% GPU, VRAM 3165 MiB, gen 35.3 tok/s |
+  | 12288 | 4.0 GB, 40/60, gen 21.2 tok/s | 3.6 GB, 100% GPU, VRAM 3483 MiB, gen 35.3 tok/s |
+  | 16384 | 4.3 GB, 46/54, gen 19.0 tok/s | 3.9 GB, 100% GPU, VRAM 3809 MiB, gen 35.7 tok/s |
+
+  (Untuned, 16k with f16 KV had been 5.4 GB, 56% CPU, ~14 tok/s.) Chosen: 12288, all layers on GPU.
+- **Code:** new `OLLAMA_NUM_GPU` setting (`num_gpu`; default -1 = Ollama decides). The Ollama
+  client no longer resends the model's earlier narration (only its tool calls), so the
+  conversation grows by the evidence, not by 600-1,100 tokens of prose a turn. Two fixes from the
+  runs below: a blank `root_cause` falls back to the summary, and the agent loop marks the reported
+  root-cause service ROOT_CAUSE on the canvas itself (qwen3:4b never called `set_node_status` for
+  it). Tests: 39/39.
+
+Results (qwen3:4b, tuned, fault injected, investigated from the UI's **Investigate** button):
+
+| Fault | Outcome | Service | Cause found | Time | Model / tool calls | Tokens in / out |
+|---|---|---|---|---|---|---|
+| schema-drift | ROOT_CAUSE_FOUND, 90% | ref-data-service ✔ | ✔ `ccy` removed in 2.4.1 (via `compare_schema`), roll back to 2.4.0 | 240 s | 7 / 4 | 24,927 / 7,032 |
+| cert-expiry (1st) | FAILED: timeout | (top hypothesis: gateway TLS cert, 65%) | – | – | 7 / 5 before | 26,569 / 8,876 |
+| cert-expiry (2nd) | ROOT_CAUSE_FOUND, 90% | regulatory-gateway ✔, decoy deploy ignored ✔ | ✘ never read gateway logs; "certificate" only guessed in remediation | 340 s | 6 / 4 | 23,727 / 7,706 |
+
+Per-call time with the tuning: 11-71 s (was 1.5-5 min). Cost: $0.
+
+Quality notes: in the schema-drift report one of three causal-chain links ("enrichment received
+null currency") cited ledger #2 (gateway metrics), which does not support it; enrichment was never
+queried. The app checks that cited ledger ids exist, not that they support the claim.
+
+**Standby, not the model, caused the remaining failures.** Windows System log (Kernel-Power 506/507):
+standby 22:13:26-22:59:27, and the stuck call returned at 22:59:28 (wall clock 49 m vs the app's
+15-min timer). The earlier 24-min call (run 3) also ended as standby ended (19:34:20/21). The app's
+keep-awake request only blocks idle sleep. After one standby, trade-capture (which was mid-request
+when the machine slept) stayed at 0 trades/min after wake although its scheduler threads were idle;
+trade-confirmations recovered. Not investigated further (JVM timers vs Windows Modern Standby);
+documented: restart the stack after the machine sleeps.

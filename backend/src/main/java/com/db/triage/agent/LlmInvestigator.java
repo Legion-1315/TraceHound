@@ -208,6 +208,12 @@ public class LlmInvestigator {
         }
 
         TriageReport report = buildReport(incident, reportInput, start, usage, stopNote);
+        if (TriageReport.ROOT_CAUSE_FOUND.equals(report.outcome())
+                && topology.service(report.rootCauseService()).isPresent()) {
+            // The canvas must show the conclusion even if the model never marked the node itself
+            // (a small local model skipped set_node_status entirely in a real run).
+            events.nodeStatus(incidentId, report.rootCauseService(), "ROOT_CAUSE");
+        }
         events.reportReady(incidentId);
         if (TriageReport.ROOT_CAUSE_FOUND.equals(report.outcome())) {
             memory.record(new IncidentMemoryService.PastIncident(incidentId, Instant.now(),
@@ -496,12 +502,14 @@ public class LlmInvestigator {
         var owner = topology.service(rcService).orElse(null);
         boolean found = TriageReport.ROOT_CAUSE_FOUND.equals(outcome) && owner != null;
         String summary = input.path("summary").asText("");
+        // Small local models sometimes put the conclusion only in the summary; never show a blank root cause.
+        String rootCause = input.path("root_cause").asText("").isBlank() ? summary : input.path("root_cause").asText();
         if (stopNote != null) {
             summary = summary + " (" + stopNote + ")";
         }
         return new TriageReport(
                 incident.getId(),
-                input.path("root_cause").asText(""),
+                rootCause,
                 Math.max(0, Math.min(100, input.path("confidence").asInt(50))),
                 summary,
                 chain,

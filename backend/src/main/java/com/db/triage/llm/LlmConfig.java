@@ -23,10 +23,11 @@ public class LlmConfig {
                         @Value("${triage.ollama.model:qwen3:8b}") String ollamaModel,
                         @Value("${triage.ollama.num-ctx:16384}") int ollamaNumCtx,
                         @Value("${triage.ollama.think:false}") boolean ollamaThink,
+                        @Value("${triage.ollama.num-gpu:-1}") int ollamaNumGpu,
                         @Value("${triage.ollama.timeout-seconds:900}") int ollamaTimeoutSeconds) {
         return switch (provider.trim().toLowerCase(Locale.ROOT)) {
             case "anthropic", "" -> new AnthropicHttpClient(apiKey, anthropicModel, anthropicUrl);
-            case "ollama" -> new OllamaClient(ollamaUrl, ollamaModel, ollamaNumCtx, ollamaThink,
+            case "ollama" -> new OllamaClient(ollamaUrl, ollamaModel, ollamaNumCtx, ollamaThink, ollamaNumGpu,
                     Duration.ofSeconds(ollamaTimeoutSeconds));
             default -> throw new IllegalArgumentException(
                     "Unknown LLM_PROVIDER '" + provider + "'. Use 'anthropic' or 'ollama'.");

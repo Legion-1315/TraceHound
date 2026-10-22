@@ -38,16 +38,23 @@ public class OllamaClient implements LlmClient {
     private final URI endpoint;
     private final int numCtx;
     private final boolean think;
+    /** GPU layers to offload; negative lets Ollama decide (it keeps a safety margin and may split with CPU). */
+    private final int numGpu;
     private final Duration timeout;
     private final ObjectMapper json = new ObjectMapper();
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     private final AtomicLong toolIds = new AtomicLong();
 
     public OllamaClient(String baseUrl, String model, int numCtx, boolean think, Duration timeout) {
+        this(baseUrl, model, numCtx, think, -1, timeout);
+    }
+
+    public OllamaClient(String baseUrl, String model, int numCtx, boolean think, int numGpu, Duration timeout) {
         this.endpoint = URI.create(baseUrl.replaceAll("/+$", "") + "/api/chat");
         this.model = model;
         this.numCtx = numCtx;
         this.think = think;
+        this.numGpu = numGpu;
         this.timeout = timeout;
     }
 
@@ -124,6 +131,9 @@ public class OllamaClient implements LlmClient {
         out.put("think", think);
         ObjectNode options = out.putObject("options");
         options.put("num_ctx", numCtx);
+        if (numGpu >= 0) {
+            options.put("num_gpu", numGpu);
+        }
         if (body.has("max_tokens")) {
             options.put("num_predict", body.get("max_tokens").asInt());
         }
@@ -150,26 +160,22 @@ public class OllamaClient implements LlmClient {
                 continue;
             }
             if (role.equals("assistant")) {
-                ObjectNode a = messages.addObject().put("role", "assistant");
-                StringBuilder text = new StringBuilder();
+                // Only the tool calls are resent. The narration is already streamed to the UI, the
+                // agent's hypotheses and findings travel in its tool calls, and in a small local
+                // context window the prose (measured 600-1,100 tokens a turn) would crowd out the
+                // evidence. Thinking blocks have no Ollama equivalent.
+                ObjectNode a = messages.addObject().put("role", "assistant").put("content", "");
                 ArrayNode calls = null;
                 for (JsonNode block : content) {
-                    switch (block.path("type").asText()) {
-                        case "text" -> text.append(block.path("text").asText());
-                        case "tool_use" -> {
-                            toolNames.put(block.path("id").asText(), block.path("name").asText());
-                            if (calls == null) calls = a.putArray("tool_calls");
-                            ObjectNode fn = calls.addObject().putObject("function");
-                            fn.put("name", block.path("name").asText());
-                            fn.set("arguments", block.path("input").isObject() ? block.get("input")
-                                    : json.createObjectNode());
-                        }
-                        default -> {
-                            // thinking and other block types have no Ollama equivalent
-                        }
+                    if (block.path("type").asText().equals("tool_use")) {
+                        toolNames.put(block.path("id").asText(), block.path("name").asText());
+                        if (calls == null) calls = a.putArray("tool_calls");
+                        ObjectNode fn = calls.addObject().putObject("function");
+                        fn.put("name", block.path("name").asText());
+                        fn.set("arguments", block.path("input").isObject() ? block.get("input")
+                                : json.createObjectNode());
                     }
                 }
-                a.put("content", text.toString());
             } else {
                 // A user turn: tool results become "tool" messages (right after the assistant's calls),
                 // any text that follows them becomes a user message.

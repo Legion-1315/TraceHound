@@ -54,6 +54,7 @@ class OllamaClientTest {
         assertFalse(out.path("stream").asBoolean());
         assertEquals(16384, out.path("options").path("num_ctx").asInt());
         assertEquals(4096, out.path("options").path("num_predict").asInt());
+        assertFalse(out.path("options").has("num_gpu"), "Ollama decides GPU layers unless told otherwise");
 
         JsonNode msgs = out.path("messages");
         assertEquals(5, msgs.size());
@@ -64,7 +65,8 @@ class OllamaClientTest {
         assertEquals("Alert: gateway errors", msgs.get(1).path("content").asText());
 
         JsonNode assistant = msgs.get(2);
-        assertEquals("Checking the gateway.", assistant.path("content").asText());
+        // earlier narration is not resent; the tool call is
+        assertEquals("", assistant.path("content").asText());
         JsonNode call = assistant.path("tool_calls").get(0).path("function");
         assertEquals("query_metrics", call.path("name").asText());
         assertEquals("regulatory-gateway", call.path("arguments").path("serviceId").asText());
@@ -79,6 +81,15 @@ class OllamaClientTest {
         JsonNode fn = out.path("tools").get(0).path("function");
         assertEquals("query_metrics", fn.path("name").asText());
         assertEquals("serviceId", fn.path("parameters").path("required").get(0).asText());
+    }
+
+    @Test
+    void forcesGpuLayersWhenConfigured() throws Exception {
+        OllamaClient allOnGpu = new OllamaClient("http://localhost:1", "qwen3:4b", 12288, false, 99,
+                Duration.ofSeconds(10));
+        ObjectNode out = allOnGpu.toOllama(anthropicRequest());
+        assertEquals(99, out.path("options").path("num_gpu").asInt());
+        assertEquals(12288, out.path("options").path("num_ctx").asInt());
     }
 
     @Test

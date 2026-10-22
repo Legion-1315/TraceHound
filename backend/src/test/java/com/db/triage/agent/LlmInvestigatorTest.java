@@ -70,6 +70,29 @@ class LlmInvestigatorTest {
     }
 
     @Test
+    void aBlankRootCauseFallsBackToTheSummary() throws Exception {
+        // qwen3:4b did this in a real run: the conclusion only in "summary", root_cause empty
+        model.script(turn -> {
+            ArrayNode b = blocks();
+            ObjectNode r = toolUse(b, "submit_report");
+            r.put("outcome", "ROOT_CAUSE_FOUND");
+            r.put("root_cause", "");
+            r.put("root_cause_service", "ref-data-service");
+            r.put("confidence", 90);
+            r.put("summary", "Ref-data 2.4.1 removed the 'ccy' field.");
+            r.putArray("causal_chain");
+            r.putArray("remediation");
+            r.putArray("ruled_out");
+            return b;
+        });
+        TriageReport report = investigator.investigate(new Incident("INC-LLM-5", "gateway errors", "", "llm"));
+        assertEquals("Ref-data 2.4.1 removed the 'ccy' field.", report.rootCause());
+        // the canvas marks the root cause even though the model never called set_node_status
+        assertTrue(events.historyFor("INC-LLM-5").stream().anyMatch(e -> e.toString().contains("ROOT_CAUSE")
+                && e.toString().contains("ref-data-service")));
+    }
+
+    @Test
     void investigatesWithToolsAndReportsOnlyCitationsThatExist() throws Exception {
         model.script(turn -> {
             ArrayNode b = blocks();

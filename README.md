@@ -86,12 +86,28 @@ window, default 16384; Ollama's own default is too small for an investigation), 
 Local tokens are not counted against the spend cap; the per-hour and per-day investigation limits
 still apply and can be raised in `.env`.
 
-**Measured on a laptop (i5-12450H, RTX 2050 4 GB, 16 GB RAM) with `qwen3:4b`: no investigation
-finished.** Each turn took 1-5 minutes (the model did not fit the GPU and ran half on CPU, and it
-writes long reasoning before each tool call), and slower when the GPU dropped to a low-power state;
-an investigation needs 12-15 turns. Details in `docs/TASK_LOG.md`. A local model is practical with
-a GPU that holds the whole model and its context (roughly 8 GB+ of VRAM for an 8B model at 16k),
-keep the machine plugged in, on a high-performance power plan, and awake.
+**Tuning for a small GPU.** Ollama keeps a safety margin and will split a model between GPU and
+CPU, which is much slower. On a laptop with a 4 GB RTX 2050 and `qwen3:4b`, these settings put the
+whole model and a 12k context on the GPU and made each model call 2.5x faster (35 vs 14 tokens/s):
+
+```bash
+# Ollama server settings (set as user environment variables, then restart the Ollama app):
+setx OLLAMA_FLASH_ATTENTION 1
+setx OLLAMA_KV_CACHE_TYPE q8_0      # 8-bit KV cache: 16k context 5.4 GB -> 3.9 GB
+# .env
+OLLAMA_NUM_GPU=99                  # every layer on the GPU (check: `ollama ps` says 100% GPU)
+OLLAMA_NUM_CTX=12288               # 16384 also fit, with ~0.2 GB to spare
+```
+
+Measured with those settings: `schema-drift` diagnosed correctly (ref-data-service, the removed
+`ccy` field, roll back 2.4.1) in 4 minutes; `cert-expiry` named the right service and ignored the
+decoy deployment, but never found the certificate (6 minutes). Small models are also loose with
+citations (one link cited evidence that did not support it). Before tuning, no investigation
+finished. Details in `docs/TASK_LOG.md`.
+
+**Keep the machine awake.** If the laptop goes into standby mid-investigation the model call
+times out, and a service that was mid-request can stay stalled after wake (seen with
+trade-capture); restart `scripts/run-local.sh` after the machine has slept.
 
 **Your API key never goes into git.** It lives only in `.env` (ignored by `.gitignore`) or in
 your host's environment variables. Spending guard-rails, all overridable in `.env`: at most 5
