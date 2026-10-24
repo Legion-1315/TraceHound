@@ -5,19 +5,18 @@ production alerts the way a senior SRE would: scope the business flow, rank hypo
 cheapest decisive checks first, walk the dependency graph following evidence, and produce a triage
 report where **every claim cites a recorded evidence-ledger entry**.
 
-It has two modes:
+It has two modes, on two branches:
 
-- **Live mode** (the real thing): six real services plus a mock regulator, real injected faults,
-  and a real Claude agent that investigates them. **You run it on your own machine with your own
-  Anthropic API key.**
-- **Simulated mode** (the original hackathon demo): telemetry is simulated in-process and a
-  scripted investigator replays a correct investigation. No key, no network.
+| Branch | Mode | Runs where |
+|---|---|---|
+| `master` | **Simulated mode**, the original hackathon demo: telemetry simulated in-process, a scripted investigator replays a correct investigation. No key, no network. | Anywhere, including free hosting (it is deployed to Render from `master`) |
+| `feature/live-estate` (this branch) | **Live mode**: six real services plus a mock regulator, real injected faults, and a real agent that investigates them, either Claude (your Anthropic API key) or a free local model through Ollama. Simulated mode is still included. | **Your own machine only** |
 
-> **Live mode is not hosted anywhere.** It needs eight JVMs (about 3 GB of RAM by the compose
-> memory limits), more than free hosting tiers give, and every investigation is a paid Claude API
-> call, so a public deployment would spend the owner's money for each visitor. To try the
-> analysis, run it locally with your own key as described below; you control and pay for your own
-> usage. (Only the simulated demo, which makes no API calls, may be deployed for free.)
+> **Why live mode runs locally only.** It needs eight JVMs (about 3 GB of RAM by the compose memory
+> limits), more than free hosting tiers give, and with Claude every investigation is a paid API
+> call, so a public deployment would spend the owner's money for each visitor. A local model avoids
+> the cost but needs a GPU on the machine running it. So: clone this branch, run it on your
+> machine, and bring your own key (or Ollama). See [Live mode](#live-mode-real-services--real-claude-agent).
 
 ## Prerequisites
 
@@ -33,6 +32,12 @@ The `estate/` folder holds six real Spring Boot services (plus a mock regulator)
 trades to each other over HTTP and keep real logs and metrics. The triage app investigates them
 with a live Claude agent; any free-text alert works, and the agent reports *out of scope* or
 *no fault found* when that is the honest answer. There is no scripted fallback in this mode.
+
+**0. Get this branch:**
+
+```bash
+git clone -b feature/live-estate https://github.com/Legion-1315/TraceHound.git && cd TraceHound
+```
 
 **1. Put your key in `.env`** (git-ignored; never commit it):
 
